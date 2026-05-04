@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
@@ -12,9 +13,6 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * The top of the entity hierarchy. Covers employers, clients,
  * personal projects, open-source orgs, volunteer orgs, and
  * educational institutions — distinguished by the `type` field.
- *
- * Additional relationships (positions, projects, people, links)
- * will be added as those models are built in subsequent slices.
  */
 #[Fillable([
     'name',
@@ -44,6 +42,26 @@ class Organization extends Model
     public function fundingRounds(): HasMany
     {
         return $this->hasMany(FundingRound::class);
+    }
+
+    public function positions(): HasMany
+    {
+        return $this->hasMany(Position::class);
+    }
+
+    public function projects(): HasMany
+    {
+        return $this->hasMany(Project::class);
+    }
+
+    public function people(): HasMany
+    {
+        return $this->hasMany(Person::class, 'current_organization_id');
+    }
+
+    public function links(): MorphMany
+    {
+        return $this->morphMany(Link::class, 'linkable');
     }
 
     public function tags(): MorphToMany

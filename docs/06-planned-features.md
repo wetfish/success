@@ -10,15 +10,15 @@ This is a living document. Update it when decisions change.
 
 Each milestone has an "intent" — what done looks like at the level of user value, not specification. Detailed scope gets fleshed out when a milestone becomes the active focus.
 
-### 1. Planning *(current)*
+### 1. Planning *(complete)*
 
 **Intent:** Mission, philosophy, schema principles, and milestone plan documented and agreed on. The README, `00-mission.md`, and this document exist.
 
-### 2. Database schema
+### 2. Database schema *(complete)*
 
 **Intent:** Migrations, Eloquent models, relationships, and seed data for all v1 entities. The author can run `migrate:fresh --seed` and have a development database to build against. Schema documented in `docs/01-database-schema.md`.
 
-### 3. Basic data entry MVP
+### 3. Basic data entry MVP *(current)*
 
 **Intent:** CRUD interfaces for organizations, positions, projects (including sub-projects), accomplishments, people, links, and tags. The author can enter their actual employment history end-to-end through the UI without dropping into the database. Source-document storage is in place even if the AI extraction pipeline isn't.
 

@@ -79,9 +79,9 @@ All status and type fields use string columns instead of MySQL ENUMs. ENUMs are 
 
 ## Money Storage
 
-All monetary values are stored as `unsignedBigInteger` in the smallest currency unit (cents for USD). Models cast these via accessors that convert to/from human-readable values at the boundary. Helper methods for formatting and parsing live in a shared `Money` support class so the conversion logic is identical across organizations, compensation, time tracking, and invoicing.
+All monetary values are stored as `unsignedBigInteger` in the smallest currency unit (cents for USD). Models cast these to `integer` for type safety on read but otherwise expose the raw cents value — no conversion happens inside the model. Conversion to and from human-readable dollar strings happens at the application boundary (form requests, controllers, views, AI prompt construction) using the shared `App\Support\Money` helper class.
 
-The rationale: integer arithmetic in PHP is safe by default (no float rounding errors), and a single storage convention across every monetary field means one set of helpers handles display and input parsing everywhere.
+The rationale: integer arithmetic in PHP is safe by default (no float rounding errors), and a single storage convention across every monetary field means one set of helpers handles display and input parsing everywhere. Keeping the model layer free of conversion magic also makes tests trivial — set integer cents, assert integer cents — without surprising round-trips through accessors.
 
 The alternative — `DECIMAL(n, m)` columns with Laravel's built-in `decimal:N` cast — is technically defensible but introduces a footgun: the `decimal` cast returns a string, and PHP arithmetic on those strings silently coerces to float, negating the precision the column was meant to preserve. Using DECIMAL safely requires `bcmath` or a money library throughout the codebase, which is more discipline to maintain than necessary for this project.
 

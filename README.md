@@ -17,7 +17,7 @@ For the project's mission, design philosophy, and explicit anti-goals, read [`do
 
 ## Status
 
-**Early planning and design.** The repo currently contains the application skeleton ([Wetfish Skeleton](https://github.com/wetfish/skeleton)) and planning documents. Schema and migrations are next.
+**Early development.** The data layer is complete — schema, models, relationships, validation rules, and a passing test suite covering all of it. The next milestone is the basic data entry MVP: forms and views for entering employment history end-to-end. Until then, there's no UI and no way to interact with the app outside of `tinker` or the test suite.
 
 ## Quick Start (Docker — Development)
 

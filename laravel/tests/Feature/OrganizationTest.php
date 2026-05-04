@@ -4,21 +4,15 @@ namespace Tests\Feature;
 
 use App\Models\FundingRound;
 use App\Models\Organization;
+use App\Models\Person;
+use App\Models\Position;
+use App\Models\Project;
 use App\Models\Tag;
-use App\Support\Money;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
-/**
- * Schema integration test for the first slice of models.
- *
- * Exercises Tag, TagAlias, Organization, and FundingRound through their
- * relationships, soft-delete behavior, and the integer-cents money
- * convention. As more models are built in subsequent slices, this test
- * file will grow to cover those additions.
- */
-class SchemaIntegrationTest extends TestCase
+class OrganizationTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -42,61 +36,75 @@ class SchemaIntegrationTest extends TestCase
     }
 
     #[Test]
-    public function an_organization_can_have_funding_rounds(): void
-    {
-        $organization = Organization::create([
-            'name' => 'Test Startup',
-            'type' => 'employer',
-        ]);
-
-        $round = FundingRound::create([
-            'organization_id' => $organization->id,
-            'round_name' => 'Series A',
-            'round_date' => '2023-01-15',
-            'amount_raised' => 5_000_000_000, // $50M in cents
-            'currency' => 'USD',
-        ]);
-
-        $this->assertCount(1, $organization->fundingRounds);
-        $this->assertSame($organization->id, $round->organization->id);
-    }
-
-    #[Test]
-    public function funding_round_amounts_persist_as_integer_cents(): void
+    public function an_organization_can_have_positions(): void
     {
         $organization = Organization::create([
             'name' => 'Test Co',
             'type' => 'employer',
         ]);
 
-        $round = FundingRound::create([
+        Position::create([
             'organization_id' => $organization->id,
-            'round_name' => 'Seed',
-            'amount_raised' => 25_000_000, // $250k in cents
+            'title' => 'Senior Engineer',
+            'employment_type' => 'full_time',
+            'start_date' => '2022-01-01',
+            'location_arrangement' => 'remote',
         ]);
 
-        // Reload from database to verify storage
-        $round->refresh();
-
-        $this->assertSame(25_000_000, $round->amount_raised);
-        $this->assertIsInt($round->amount_raised);
+        $this->assertCount(1, $organization->positions);
+        $this->assertSame('Senior Engineer', $organization->positions->first()->title);
     }
 
     #[Test]
-    public function money_helper_formats_amount_raised_for_display(): void
+    public function an_organization_can_have_projects(): void
     {
         $organization = Organization::create([
             'name' => 'Test Co',
             'type' => 'employer',
         ]);
 
-        $round = FundingRound::create([
+        Project::create([
             'organization_id' => $organization->id,
-            'round_name' => 'Series B',
-            'amount_raised' => 7_000_000_000, // $70M in cents
+            'name' => 'Internal Tools',
+            'visibility' => 'internal',
+            'contribution_level' => 'lead',
         ]);
 
-        $this->assertSame('70000000.00', Money::format($round->amount_raised));
+        $this->assertCount(1, $organization->projects);
+    }
+
+    #[Test]
+    public function an_organization_can_have_associated_people(): void
+    {
+        $organization = Organization::create([
+            'name' => 'Test Co',
+            'type' => 'employer',
+        ]);
+
+        Person::create([
+            'name' => 'Alex Manager',
+            'current_organization_id' => $organization->id,
+        ]);
+
+        $this->assertCount(1, $organization->people);
+        $this->assertSame('Alex Manager', $organization->people->first()->name);
+    }
+
+    #[Test]
+    public function an_organization_can_have_links(): void
+    {
+        $organization = Organization::create([
+            'name' => 'Test Co',
+            'type' => 'employer',
+        ]);
+
+        $organization->links()->create([
+            'type' => 'website',
+            'url' => 'https://example.com',
+        ]);
+
+        $this->assertCount(1, $organization->links);
+        $this->assertSame('website', $organization->links->first()->type);
     }
 
     #[Test]
@@ -117,23 +125,9 @@ class SchemaIntegrationTest extends TestCase
         $this->assertCount(1, $organization->tags);
         $this->assertSame('Bitcoin', $organization->tags->first()->name);
 
-        // Verify the inverse relationship works — tag knows its organizations
+        // Inverse relationship works — tag knows its organizations
         $this->assertCount(1, $tag->organizations);
         $this->assertSame($organization->id, $tag->organizations->first()->id);
-    }
-
-    #[Test]
-    public function tag_aliases_can_be_attached_to_a_tag(): void
-    {
-        $tag = Tag::create([
-            'name' => 'PostgreSQL',
-            'category' => 'database',
-        ]);
-
-        $tag->aliases()->create(['alias' => 'Postgres']);
-        $tag->aliases()->create(['alias' => 'postgres']);
-
-        $this->assertCount(2, $tag->aliases);
     }
 
     #[Test]
@@ -150,12 +144,9 @@ class SchemaIntegrationTest extends TestCase
             'amount_raised' => 1_000_000_000,
         ]);
 
-        $organization->delete(); // soft delete
+        $organization->delete();
 
         $this->assertSoftDeleted($organization);
-
-        // Funding round still exists in the database — soft delete doesn't
-        // cascade. Cascade only fires on a hard delete (forceDelete).
         $this->assertDatabaseCount('funding_rounds', 1);
     }
 
@@ -180,22 +171,21 @@ class SchemaIntegrationTest extends TestCase
     }
 
     #[Test]
-    public function deleting_a_tag_cascades_to_its_aliases(): void
+    public function deleting_a_person_with_organization_sets_null_on_the_organization_side(): void
     {
-        $tag = Tag::create([
-            'name' => 'PostgreSQL',
-            'category' => 'database',
+        $organization = Organization::create([
+            'name' => 'Test Co',
+            'type' => 'employer',
         ]);
 
-        $tag->aliases()->create(['alias' => 'Postgres']);
-        $tag->aliases()->create(['alias' => 'postgres']);
+        $person = Person::create([
+            'name' => 'Alex Manager',
+            'current_organization_id' => $organization->id,
+        ]);
 
-        $this->assertDatabaseCount('tag_aliases', 2);
+        $organization->forceDelete();
 
-        // Tags don't use soft deletes — this is a hard delete
-        $tag->delete();
-
-        $this->assertDatabaseMissing('tags', ['id' => $tag->id]);
-        $this->assertDatabaseCount('tag_aliases', 0);
+        $person->refresh();
+        $this->assertNull($person->current_organization_id);
     }
 }
