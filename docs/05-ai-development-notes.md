@@ -77,6 +77,18 @@ All forms must display validation errors visibly to the user (typically in red t
 
 All status and type fields use string columns instead of MySQL ENUMs. ENUMs are difficult to modify in production migrations and cause issues with schema diffing tools. Expected values are documented in the schema docs and enforced in application logic.
 
+## Money Storage
+
+All monetary values are stored as `unsignedBigInteger` in the smallest currency unit (cents for USD). Models cast these via accessors that convert to/from human-readable values at the boundary. Helper methods for formatting and parsing live in a shared `Money` support class so the conversion logic is identical across organizations, compensation, time tracking, and invoicing.
+
+The rationale: integer arithmetic in PHP is safe by default (no float rounding errors), and a single storage convention across every monetary field means one set of helpers handles display and input parsing everywhere.
+
+The alternative — `DECIMAL(n, m)` columns with Laravel's built-in `decimal:N` cast — is technically defensible but introduces a footgun: the `decimal` cast returns a string, and PHP arithmetic on those strings silently coerces to float, negating the precision the column was meant to preserve. Using DECIMAL safely requires `bcmath` or a money library throughout the codebase, which is more discipline to maintain than necessary for this project.
+
+Laravel itself does not recommend a specific approach; both options are supported. Integer cents was chosen for arithmetic safety and consistency.
+
+This applies to every monetary field without exception: funding rounds, future compensation events, time tracking rates, invoice line items, totals, taxes.
+
 ## Privacy
 
 Avoid committing real personal data, financial institution names, or other sensitive information to the repository. Use generic placeholders where needed.

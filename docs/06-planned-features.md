@@ -48,7 +48,7 @@ Each milestone has an "intent" — what done looks like at the level of user val
 
 ### 10. Multi-user / SaaS readiness
 
-**Intent:** Proper authentication, subscription handling, hosted deployment, tag scope promotion workflow, support for users beyond the author. Until this milestone, the app is a single-user tool that happens to be open source.
+**Intent:** Add a `users` table, build authentication, run the migration that adds `user_id` foreign keys to every owned entity, build subscription handling, set up hosted deployment, and add the nullable `user_id` foreign key to `tags` for the global/personal scope distinction. Until this milestone, the app is a single-user tool that happens to be open source.
 
 ---
 
@@ -94,15 +94,23 @@ Employers, clients, personal projects, open source communities, volunteer work, 
 
 A separate `career_themes` table holds user-authored narrative threads. These cross organizations and projects and represent the user's framing of their own career. Themes link to the projects and accomplishments that exemplify them, and the AI uses them as the spine of tailored output.
 
-### Tags: global with a user-scoped escape hatch
+### No user system or auth scaffolding until milestone 10
 
-The `tags` table includes a `scope` column (`global` or `user`) and a nullable `user_id`. User-created tags default to user scope and can be promoted to global later. This:
+MVP runs as a single-user application. There is no `users` table, no authentication, no `user_id` foreign keys on any entity, and the default Laravel auth migrations are removed from the project. The app is intended to be self-hosted by one person dogfooding it during their job search.
 
-- Keeps potentially sensitive tags (internal codenames, confidential client domains) private by default
-- Allows a shared vocabulary for the majority of tags that aren't sensitive
-- Defers the "who can promote a tag to global" workflow until SaaS readiness, while protecting the data shape from breaking when that workflow lands
+The trade-off this creates is real: when multi-user support lands at milestone 10, every entity that holds user data needs a migration to add a `user_id` foreign key. That's roughly ten tables. Mechanical work, half a day with concentrated effort.
 
-In single-user mode, the distinction is invisible — everything the user creates is theirs.
+We accepted this cost because the alternative — carrying nullable `user_id` columns everywhere from day one with no users table to constrain them — creates worse problems. Future contributors would see the columns and assume there's a user system. Factories would need to invent user references that point at nothing. Every new table going forward would have to remember to include the column even though it's structurally meaningless. The schema would lie about its semantics for an indefinite period of time.
+
+Honest schema now, migration later, is the better path.
+
+### Tags: flat and global for MVP
+
+The `tags` table is intentionally minimal: `name`, `category`, `description`. No scope column, no `user_id`, no aliases-with-scope. Every tag in MVP is effectively global because there's only one user.
+
+When multi-user support lands at milestone 10, a nullable `user_id` foreign key gets added to `tags`: `null` means a global tag (visible to all users), a populated `user_id` means a personal tag (visible only to that user). This achieves the "global with a user-scoped escape hatch" pattern without needing a separate `scope` column whose values would just be derivable from whether `user_id` is null. The data model becomes the documentation.
+
+This was a deliberate simplification from an earlier proposal that included a `scope` enum-like string. We dropped it because (a) it's redundant with the nullable user_id approach, and (b) MVP doesn't have a user concept yet, so any scoping field would be carrying meaningless data until milestone 10.
 
 ### Source documents as a peer entity
 
@@ -122,6 +130,20 @@ This pattern doesn't apply to positions, which are usually known to the day.
 
 Some integrity rules — for example, "an accomplishment must belong to either a project or a position, but not both, and not neither" — are enforced in the model layer rather than the database. Database constraints are useful but inflexible; model validators give clearer error messages and are easier to evolve.
 
+### Monetary values stored as integer cents
+
+Every monetary field — funding rounds, future compensation, future invoice amounts, future hourly rates — is stored as `unsignedBigInteger` in the smallest currency unit (cents for USD). Models cast at the boundary via accessors. Helpers for display and parsing live in a shared `Money` support class.
+
+The full rationale, the alternative we rejected (`DECIMAL` with the `decimal:N` cast), and why is documented in `docs/05-ai-development-notes.md` under "Money Storage." Short version: integer arithmetic in PHP is safe by default; the DECIMAL approach silently coerces to float during arithmetic and requires `bcmath` discipline everywhere to be safe.
+
+### Accomplishments support both points-in-time and spans
+
+The `accomplishments` table has three date-related columns: `date`, `period_start`, and `period_end`. A point-in-time accomplishment ("shipped X on March 15") uses `date`. A span ("mentored 5 engineers from Q1 2023 through Q3 2024") uses `period_start` and `period_end`. An ongoing accomplishment ("currently leading the migration to Postgres") uses `period_start` alone with `period_end` left null.
+
+Validation rule (model layer): exactly one of `date` or `period_start` is set. `period_end` is only meaningful when `period_start` is set.
+
+We considered an explicit `is_ongoing` boolean but rejected it — "ongoing" is derivable from `period_start IS NOT NULL AND period_end IS NULL`, and adding the boolean creates two sources of truth that can disagree. The model exposes `isOngoing()` as a method instead.
+
 ---
 
 ## Deferred features
@@ -137,7 +159,7 @@ Things we explicitly considered and decided to build later. Each is designed-aro
 | Accomplishment variants (per-application rewrites) | Belongs with the resume builder | Build alongside the resume generator |
 | Job listings, applications, generated resumes | Resume builder milestone | Whole separate phase of the schema, additive |
 | References, certifications, education | Trivial flat tables; no schema risk | Add when needed |
-| User accounts / multi-tenancy | Single-user dogfood phase first | Skeleton ships with auth scaffolding; tag scoping already designed for this |
+| User accounts / multi-tenancy | Single-user dogfood phase first; carrying nullable `user_id` columns with no users table would be misleading | When milestone 10 lands: add a `users` table, then add `user_id` foreign keys via migration to roughly ten entity tables (organizations, positions, projects, accomplishments, people, source_documents, career_themes, tags, etc.), backfilling all existing rows to point at the dogfood user |
 
 ---
 
@@ -151,15 +173,11 @@ Anthropic's Claude API is the leading candidate for the extraction and generatio
 
 ### Hosting strategy for the eventual SaaS
 
-Single-tenant per user (one database per customer)? Multi-tenant with row-level scoping? Multi-tenant changes some schema decisions (especially around tag scoping). Doesn't need to be answered until milestone 10.
+Single-tenant per user (one database per customer)? Multi-tenant with row-level scoping? Multi-tenant changes some schema decisions (especially how the eventual `tags.user_id` foreign key behaves). Doesn't need to be answered until milestone 10.
 
 ### Monetization model specifics
 
 The README outlines the rough shape (cheap basic tier, higher-priced advanced tier). Actual pricing depends on real costs of AI inference per user, which we won't know until we've dogfooded the AI features. To be revisited after milestone 5.
-
-### How to handle ongoing accomplishments
-
-"Mentored five engineers over my tenure" is real, important, and doesn't fit a single date. Probably wants an `is_ongoing` flag on accomplishments plus optional `period_start` / `period_end` separate from a single `date` column. Decide before the accomplishments UI ships.
 
 ### Privacy of source documents
 
