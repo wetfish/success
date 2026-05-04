@@ -89,6 +89,22 @@ Laravel itself does not recommend a specific approach; both options are supporte
 
 This applies to every monetary field without exception: funding rounds, future compensation events, time tracking rates, invoice line items, totals, taxes.
 
+## Cache, Queue, and Session Drivers
+
+The MVP uses file-based drivers configured via `.env`:
+
+```ini
+SESSION_DRIVER=file
+QUEUE_CONNECTION=sync
+CACHE_STORE=file
+```
+
+The Laravel default `database` drivers and their associated migrations (`create_cache_table`, `create_jobs_table`) were removed during initial setup, alongside `create_users_table`.
+
+The reasoning: file-based drivers are simpler for a single-user self-hosted deployment, require no schema infrastructure, and meet MVP needs. Sessions persist to `storage/framework/sessions/`, cache to `storage/framework/cache/`, and the `sync` queue connection runs jobs synchronously in the same request rather than queueing them at all.
+
+When async work becomes a real requirement — long-running AI calls, scheduled extraction jobs, email delivery — the queue driver gets revisited and a real driver (database, Redis, or similar) is added back. When the app moves to a multi-user hosted environment at milestone 10, all three drivers should be re-evaluated against production needs (likely Redis for cache and sessions, a real queue driver for jobs).
+
 ## Privacy
 
 Avoid committing real personal data, financial institution names, or other sensitive information to the repository. Use generic placeholders where needed.
