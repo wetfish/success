@@ -139,6 +139,44 @@ class ProjectCrudTest extends TestCase
         $this->assertSame($parent->id, $child->parent_project_id);
     }
 
+    /**
+     * Regression test: a sub-project submitted with string-typed ID
+     * values (the form-submission path) must succeed. Previously, the
+     * model's validateInvariants() used strict equality comparing the
+     * DB-fetched int parent org ID against the form-submitted string
+     * organization ID, falsely rejecting valid sub-projects.
+     */
+    #[Test]
+    public function a_sub_project_can_be_created_with_string_typed_ids(): void
+    {
+        $organization = $this->makeOrganization();
+        $parent = Project::create([
+            'organization_id' => $organization->id,
+            'name' => 'Parent',
+            'visibility' => 'public',
+            'contribution_level' => 'lead',
+            'date_precision' => 'month',
+        ]);
+
+        // IDs are explicitly cast to strings to match how values arrive
+        // from real HTTP form submissions. Without this cast, the test
+        // wouldn't catch the type-comparison regression class.
+        $response = $this->post(route('projects.store'), [
+            'organization_id' => (string) $organization->id,
+            'parent_project_id' => (string) $parent->id,
+            'name' => 'String-typed Child',
+            'visibility' => 'public',
+            'contribution_level' => 'lead',
+            'date_precision' => 'month',
+            'start_date_month' => '2023-06',
+        ]);
+
+        $child = Project::where('name', 'String-typed Child')->first();
+        $this->assertNotNull($child);
+        $this->assertSame($parent->id, $child->parent_project_id);
+        $response->assertRedirect(route('projects.show', $child));
+    }
+
     #[Test]
     public function day_precision_dates_are_stored_as_real_dates(): void
     {
@@ -367,14 +405,9 @@ class ProjectCrudTest extends TestCase
         $response = $this->get(route('organizations.show', $organization));
         $content = $response->getContent();
 
-        // Both projects exist; the position project appears (in the
-        // position list with a count), but only the org project should
-        // appear in the "Other projects" section.
         $this->assertStringContainsString('Org Project', $content);
 
-        // Find the "Other projects" heading position
         $otherProjectsPos = strpos($content, 'Other projects');
-        // The Org Project name should appear after that heading
         $orgProjectInOtherSection = strpos($content, 'Org Project', $otherProjectsPos);
         $this->assertNotFalse($orgProjectInOtherSection);
     }

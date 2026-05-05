@@ -74,6 +74,14 @@ class Project extends Model
      * a sub-project's parent must belong to the same organization.
      * Cross-org parenting would represent a data model error.
      *
+     * Note: both sides of the comparison are cast to int before
+     * checking equality. The DB-fetched value comes back as int via
+     * Eloquent, but `$this->organization_id` may be a string when set
+     * from form input that hasn't been cast yet (mass assignment from
+     * POST data flows through saving() before casts apply consistently).
+     * Strict comparison without normalization would treat `1 !== "1"`
+     * as a real mismatch and falsely reject valid sub-projects.
+     *
      * @throws InvalidArgumentException
      */
     public function validateInvariants(): void
@@ -85,7 +93,7 @@ class Project extends Model
         $parentOrgId = static::where('id', $this->parent_project_id)
             ->value('organization_id');
 
-        if ($parentOrgId !== null && $parentOrgId !== $this->organization_id) {
+        if ($parentOrgId !== null && (int) $parentOrgId !== (int) $this->organization_id) {
             throw new InvalidArgumentException(
                 'A sub-project must belong to the same organization as its parent project.'
             );
