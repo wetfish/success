@@ -105,6 +105,16 @@ The reasoning: file-based drivers are simpler for a single-user self-hosted depl
 
 When async work becomes a real requirement — long-running AI calls, scheduled extraction jobs, email delivery — the queue driver gets revisited and a real driver (database, Redis, or similar) is added back. When the app moves to a multi-user hosted environment at milestone 10, all three drivers should be re-evaluated against production needs (likely Redis for cache and sessions, a real queue driver for jobs).
 
+## Dependencies
+
+Avoid adding external dependencies — npm packages, Composer packages, third-party CDNs, hosted fonts, hosted analytics, hosted asset libraries — unless absolutely necessary. Every dependency is attack surface for supply-chain compromise, a potential privacy leak (CDNs see every visitor's IP), and a reason the app can break or look wrong when offline.
+
+The default answer is "no" until a dependency clearly earns its place. When a dependency is genuinely needed, it goes through review: what does this give us that we can't easily build ourselves, what's the maintenance status, what's the install footprint, and is this tradeoff documented somewhere a future contributor will find it?
+
+The boring path is usually right. System fonts instead of custom typography. Hand-built Tailwind components instead of UI libraries. Plain CSS instead of preprocessor add-ons. Stock Laravel and Vite instead of starter kits. The skeleton already includes everything needed to build a real app; reach for new dependencies only when the absence of one is a concrete, recurring problem — not preemptively because something looks nice.
+
+This rule is especially load-bearing for AI-assisted development. AI-generated code tends to reach for popular libraries because that's what training data shows. The training data does not know about this project's preferences. When in doubt, write the code by hand or skip the feature.
+
 ## Privacy
 
 Avoid committing real personal data, financial institution names, or other sensitive information to the repository. Use generic placeholders where needed.

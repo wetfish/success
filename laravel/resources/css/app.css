@@ -6,6 +6,300 @@
 @source '../**/*.js';
 
 @theme {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+    --font-sans: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
         'Segoe UI Symbol', 'Noto Color Emoji';
+
+    /* Background palette — a radial glow from saturated plum/magenta at
+     * the focal point fading into a deep navy at the edges. The bumped
+     * saturation reduces gradient banding by giving the renderer more
+     * chroma to interpolate through. */
+    --color-bg-glow: #4a1f5c;
+    --color-bg-mid: #1f1838;
+    --color-bg-edge: #0c1024;
+
+    /* Card surface — semi-transparent so the gradient and sparkles
+     * remain visible behind the content. */
+    --color-surface-card: rgb(15 18 30 / 0.7);
+    --color-surface-card-border: rgb(255 255 255 / 0.08);
+
+    /* Input surface — substantially more opaque than the card so fields
+     * read as solid elements carved into the card surface. The lighter
+     * border catches the eye and the inset shadow creates a subtle
+     * "recessed" feel. */
+    --color-surface-input: rgb(20 24 38 / 0.95);
+    --color-surface-input-border: rgb(255 255 255 / 0.18);
+    --color-surface-input-border-focus: rgb(217 70 163 / 0.7);
+    --shadow-input-inset: inset 0 1px 2px rgb(0 0 0 / 0.25);
+
+    /* Text — off-white primary, muted secondary. Never pure white. */
+    --color-text-primary: #e8e6f0;
+    --color-text-secondary: #9b97ad;
+    --color-text-muted: #6b6880;
+    --color-text-placeholder: #5a5770;
+
+    /* Divider — subtle separator within the card. */
+    --color-divider: rgb(255 255 255 / 0.08);
+
+    /* Accent — saturated pink-magenta pulled from the warmer end of
+     * the background gradient. */
+    --color-accent: #d946a3;
+    --color-accent-hover: #e85ab2;
+    --color-accent-text: #ffffff;
+
+    /* Status / messaging colors. */
+    --color-status-bg: rgb(217 70 163 / 0.12);
+    --color-status-border: rgb(217 70 163 / 0.3);
+    --color-error: #f87a8a;
+    --color-error-bg: rgb(248 122 138 / 0.1);
+    --color-error-border: rgb(248 122 138 / 0.35);
+
+    /* Subtle hover overlay — used for interactive list rows and other
+     * surfaces that need a gentle "you can click this" affordance. */
+    --color-hover-overlay: rgb(255 255 255 / 0.04);
+}
+
+/* The page background is composed of two stacked layers:
+ *
+ *   1. A 1200x1200 tiled SVG of small dots ("sparkles") on top, with
+ *      varied sizes and opacities. Stars are kept 60px away from any
+ *      tile edge so repetitions don't produce visible seams. The tile
+ *      is large enough that on a typical viewport you only see one or
+ *      two repeats, and the variance hides them. The SVG is embedded
+ *      as a data URL so there's no external asset.
+ *
+ *   2. A radial gradient underneath, with the focal point slightly
+ *      above center. This places the brightest part of the glow behind
+ *      the card so the card appears to sit on top of a light source.
+ *
+ * Both layers are fixed during scroll so the background stays coherent
+ * regardless of page length. */
+body {
+    background:
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='1200' height='1200' viewBox='0 0 1200 1200'><circle cx='750.6' cy='87.0' r='0.47' fill='white' opacity='0.54'/><circle cx='790.8' cy='1023.6' r='0.53' fill='white' opacity='0.26'/><circle cx='296.1' cy='605.8' r='0.46' fill='white' opacity='0.51'/><circle cx='648.5' cy='298.1' r='0.64' fill='white' opacity='0.25'/><circle cx='930.3' cy='814.0' r='0.45' fill='white' opacity='0.63'/><circle cx='423.5' cy='160.2' r='0.65' fill='white' opacity='0.49'/><circle cx='639.1' cy='1111.0' r='0.57' fill='white' opacity='0.58'/><circle cx='728.0' cy='990.6' r='0.61' fill='white' opacity='0.27'/><circle cx='306.1' cy='372.5' r='0.47' fill='white' opacity='0.29'/><circle cx='360.2' cy='746.5' r='0.51' fill='white' opacity='0.33'/><circle cx='348.3' cy='1071.6' r='0.58' fill='white' opacity='0.32'/><circle cx='847.5' cy='236.5' r='0.7' fill='white' opacity='0.51'/><circle cx='661.5' cy='799.4' r='1.01' fill='white' opacity='0.34'/><circle cx='94.7' cy='400.7' r='0.46' fill='white' opacity='0.63'/><circle cx='1006.5' cy='399.9' r='0.52' fill='white' opacity='0.62'/><circle cx='555.6' cy='346.1' r='0.57' fill='white' opacity='0.36'/><circle cx='491.4' cy='296.9' r='1.3' fill='white' opacity='0.29'/><circle cx='110.9' cy='178.4' r='0.64' fill='white' opacity='0.42'/><circle cx='128.6' cy='472.1' r='1.31' fill='white' opacity='0.64'/><circle cx='989.6' cy='72.4' r='0.97' fill='white' opacity='0.46'/><circle cx='180.5' cy='529.5' r='0.69' fill='white' opacity='0.6'/><circle cx='252.9' cy='1045.6' r='0.82' fill='white' opacity='0.51'/><circle cx='717.7' cy='225.1' r='0.92' fill='white' opacity='0.56'/><circle cx='632.8' cy='60.6' r='0.41' fill='white' opacity='0.62'/><circle cx='1009.0' cy='958.2' r='0.42' fill='white' opacity='0.6'/><circle cx='1082.7' cy='152.5' r='0.42' fill='white' opacity='0.55'/><circle cx='573.3' cy='653.8' r='0.66' fill='white' opacity='0.42'/><circle cx='396.7' cy='1134.8' r='0.53' fill='white' opacity='0.46'/><circle cx='190.7' cy='302.7' r='0.58' fill='white' opacity='0.34'/><circle cx='297.8' cy='136.7' r='0.47' fill='white' opacity='0.61'/><circle cx='988.4' cy='136.5' r='0.6' fill='white' opacity='0.34'/><circle cx='676.7' cy='570.5' r='1.02' fill='white' opacity='0.33'/><circle cx='517.5' cy='564.4' r='0.97' fill='white' opacity='0.64'/><circle cx='426.4' cy='990.6' r='0.46' fill='white' opacity='0.43'/><circle cx='538.6' cy='990.3' r='0.42' fill='white' opacity='0.65'/><circle cx='962.9' cy='1106.5' r='1.04' fill='white' opacity='0.32'/><circle cx='584.5' cy='290.8' r='0.42' fill='white' opacity='0.4'/><circle cx='1124.1' cy='346.4' r='0.88' fill='white' opacity='0.42'/><circle cx='1093.9' cy='1135.1' r='0.62' fill='white' opacity='0.31'/><circle cx='685.5' cy='645.6' r='0.72' fill='white' opacity='0.48'/><circle cx='603.1' cy='980.9' r='0.69' fill='white' opacity='0.28'/><circle cx='260.7' cy='702.6' r='0.47' fill='white' opacity='0.3'/><circle cx='1021.5' cy='325.9' r='0.59' fill='white' opacity='0.42'/><circle cx='1069.5' cy='280.6' r='0.8' fill='white' opacity='0.41'/><circle cx='785.4' cy='384.0' r='0.63' fill='white' opacity='0.28'/><circle cx='554.9' cy='1138.3' r='1.13' fill='white' opacity='0.34'/><circle cx='459.1' cy='230.4' r='0.98' fill='white' opacity='0.49'/><circle cx='1126.2' cy='766.3' r='0.65' fill='white' opacity='0.37'/><circle cx='205.0' cy='184.7' r='0.57' fill='white' opacity='0.36'/><circle cx='713.2' cy='835.0' r='0.59' fill='white' opacity='0.36'/><circle cx='63.8' cy='892.8' r='0.48' fill='white' opacity='0.55'/><circle cx='1013.8' cy='1036.2' r='0.65' fill='white' opacity='0.48'/><circle cx='919.8' cy='989.6' r='0.78' fill='white' opacity='0.35'/><circle cx='171.0' cy='902.5' r='0.86' fill='white' opacity='0.5'/><circle cx='418.8' cy='1065.3' r='1.05' fill='white' opacity='0.57'/><circle cx='348.2' cy='910.4' r='0.66' fill='white' opacity='0.59'/><circle cx='919.0' cy='305.8' r='0.46' fill='white' opacity='0.38'/><circle cx='491.7' cy='1119.6' r='0.68' fill='white' opacity='0.3'/><circle cx='846.8' cy='398.8' r='0.55' fill='white' opacity='0.4'/><circle cx='825.5' cy='61.8' r='0.92' fill='white' opacity='0.54'/><circle cx='861.3' cy='784.3' r='0.42' fill='white' opacity='0.52'/><circle cx='416.6' cy='399.0' r='0.99' fill='white' opacity='0.37'/><circle cx='394.0' cy='501.1' r='0.49' fill='white' opacity='0.3'/><circle cx='724.8' cy='385.0' r='0.4' fill='white' opacity='0.36'/><circle cx='767.1' cy='562.2' r='0.46' fill='white' opacity='0.44'/></svg>"),
+        radial-gradient(ellipse 80% 60% at 50% 35%, var(--color-bg-glow) 0%, var(--color-bg-mid) 45%, var(--color-bg-edge) 100%);
+    background-attachment: fixed;
+    background-size: 1200px 1200px, cover;
+    color: var(--color-text-primary);
+}
+
+/* Form field placeholders inherit muted text color so they read as
+ * "hint" rather than "value" against the input surface. */
+::placeholder {
+    color: var(--color-text-placeholder);
+    opacity: 1;
+}
+
+/* Component classes for reusable UI patterns. Tailwind utilities
+ * applied at the use site can still override these when needed.
+ *
+ * The naming convention is descriptive of role rather than appearance:
+ *   .btn-primary not .btn-pink
+ *   .input not .field-dark
+ * — so the visual treatment can change without touching template code. */
+@layer components {
+    /* Buttons ============================================================ */
+
+    .btn-primary {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.5rem 1rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+        line-height: 1.25rem;
+        border-radius: 0.375rem;
+        background: var(--color-accent);
+        color: var(--color-accent-text);
+        transition: background 150ms ease;
+        cursor: pointer;
+    }
+    .btn-primary:hover {
+        background: var(--color-accent-hover);
+    }
+    .btn-primary:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 2px;
+    }
+
+    .btn-secondary {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.375rem 0.75rem;
+        font-size: 0.875rem;
+        line-height: 1.25rem;
+        border-radius: 0.375rem;
+        border: 1px solid var(--color-surface-input-border);
+        background: transparent;
+        color: var(--color-text-primary);
+        transition: border-color 150ms ease, color 150ms ease;
+        cursor: pointer;
+    }
+    .btn-secondary:hover {
+        border-color: var(--color-text-primary);
+    }
+    .btn-secondary:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 2px;
+    }
+
+    .btn-destructive {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.375rem 0.75rem;
+        font-size: 0.875rem;
+        line-height: 1.25rem;
+        border-radius: 0.375rem;
+        border: 1px solid var(--color-surface-input-border);
+        background: transparent;
+        color: var(--color-text-primary);
+        transition: border-color 150ms ease, color 150ms ease;
+        cursor: pointer;
+    }
+    .btn-destructive:hover {
+        border-color: var(--color-error);
+        color: var(--color-error);
+    }
+    .btn-destructive:focus-visible {
+        outline: 2px solid var(--color-error);
+        outline-offset: 2px;
+    }
+
+    /* Inputs ============================================================= */
+
+    .input {
+        display: block;
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        font-size: 0.875rem;
+        line-height: 1.25rem;
+        background: var(--color-surface-input);
+        border: 1px solid var(--color-surface-input-border);
+        border-radius: 0.375rem;
+        color: var(--color-text-primary);
+        box-shadow: var(--shadow-input-inset);
+        transition: border-color 150ms ease;
+    }
+    .input:focus {
+        outline: none;
+        border-color: var(--color-surface-input-border-focus);
+    }
+    .input.has-error {
+        border-color: var(--color-error);
+    }
+
+    /* Links ============================================================== */
+
+    .link-subtle {
+        color: var(--color-text-secondary);
+        transition: color 150ms ease;
+    }
+    .link-subtle:hover {
+        color: var(--color-text-primary);
+    }
+    .link-subtle:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 2px;
+        border-radius: 2px;
+    }
+
+    .link-emphasis {
+        color: var(--color-text-primary);
+        text-decoration: underline;
+        text-underline-offset: 2px;
+        transition: color 150ms ease;
+    }
+    .link-emphasis:hover {
+        color: var(--color-accent);
+    }
+    .link-emphasis:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 2px;
+        border-radius: 2px;
+    }
+
+    /* Field labels and helpers =========================================== */
+
+    .field-label {
+        display: block;
+        font-size: 0.875rem;
+        font-weight: 500;
+        line-height: 1.25rem;
+        margin-bottom: 0.375rem;
+        color: var(--color-text-primary);
+    }
+
+    /* Inline hint inside a field-label (e.g. "(optional, never leaves
+     * your catalog)"). Smaller, lighter, normal weight. */
+    .field-label-hint {
+        font-size: 0.75rem;
+        font-weight: 400;
+        margin-left: 0.25rem;
+        color: var(--color-text-muted);
+    }
+
+    .field-help {
+        font-size: 0.75rem;
+        line-height: 1rem;
+        margin-top: 0.375rem;
+        color: var(--color-text-muted);
+    }
+
+    .field-error {
+        font-size: 0.875rem;
+        line-height: 1.25rem;
+        margin-top: 0.375rem;
+        color: var(--color-error);
+    }
+
+    /* Section heading — the small uppercase labels that group related
+     * form fields or page sections. */
+    .section-heading {
+        font-size: 0.875rem;
+        font-weight: 600;
+        line-height: 1.25rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--color-text-secondary);
+    }
+
+    /* Metadata =========================================================== */
+
+    /* Used for the dt elements in show-page metadata grids. */
+    .metadata-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        line-height: 1rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--color-text-muted);
+    }
+
+    /* Status banner ====================================================== */
+
+    .status-banner {
+        padding: 0.75rem 1rem;
+        font-size: 0.875rem;
+        line-height: 1.25rem;
+        border-radius: 0.375rem;
+        background: var(--color-status-bg);
+        border: 1px solid var(--color-status-border);
+        color: var(--color-text-primary);
+    }
+
+    /* List row =========================================================== */
+
+    /* Clickable rows in entity index lists. The block-display ensures
+     * the entire row area is clickable, not just the text. */
+    .list-row {
+        display: block;
+        padding: 1rem 1.25rem;
+        color: inherit;
+        transition: background 150ms ease;
+    }
+    .list-row:hover {
+        background: var(--color-hover-overlay);
+    }
+    .list-row:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: -2px;
+    }
 }
