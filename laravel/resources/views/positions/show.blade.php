@@ -2,6 +2,15 @@
 
 @section('title', $position->title . ' — Success')
 
+@php
+    $projects = $position->projects()
+        ->whereNull('parent_project_id')
+        ->withCount('childProjects')
+        ->orderByRaw('end_date IS NULL DESC')
+        ->orderBy('start_date', 'desc')
+        ->get();
+@endphp
+
 @section('content')
     <div class="mb-2">
         <a href="{{ route('organizations.show', $position->organization) }}" class="link-subtle text-sm">
@@ -118,13 +127,62 @@
         @endif
     </dl>
 
+    {{-- Projects under this position. Only top-level projects are shown
+         here; sub-projects appear nested under their parent's show page.
+         Sorted reverse chronological with active projects first. --}}
+    <div class="mb-12">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold">Projects</h2>
+            <a href="{{ route('projects.createForPosition', $position) }}" class="btn-primary">
+                Add project
+            </a>
+        </div>
+
+        @if ($projects->isEmpty())
+            <div
+                class="border border-dashed rounded-lg p-8 text-center text-sm"
+                style="border-color: var(--color-surface-input-border); color: var(--color-text-secondary);"
+            >
+                No projects added yet. The discrete bodies of work you handled in this role will appear here.
+            </div>
+        @else
+            <ul
+                class="rounded-lg overflow-hidden border"
+                style="border-color: var(--color-surface-input-border); background: var(--color-surface-input);"
+            >
+                @foreach ($projects as $project)
+                    <li class="@if (! $loop->first) border-t @endif" style="border-color: var(--color-divider);">
+                        <a href="{{ route('projects.show', $project) }}" class="list-row">
+                            <div class="flex items-center justify-between gap-4">
+                                <div class="min-w-0">
+                                    <h3 class="font-medium truncate">{{ $project->name }}</h3>
+                                    @if ($project->description)
+                                        <p class="text-sm truncate mt-0.5" style="color: var(--color-text-secondary);">{{ $project->description }}</p>
+                                    @endif
+                                </div>
+                                <div class="flex items-center gap-3 text-xs shrink-0" style="color: var(--color-text-muted);">
+                                    @if ($project->child_projects_count > 0)
+                                        <span>{{ $project->child_projects_count }} sub-{{ $project->child_projects_count === 1 ? 'project' : 'projects' }}</span>
+                                    @endif
+                                    <span class="capitalize">{{ str_replace('_', ' ', $project->visibility) }}</span>
+                                </div>
+                            </div>
+                        </a>
+                    </li>
+                @endforeach
+            </ul>
+        @endif
+    </div>
+
+    {{-- Accomplishments placeholder. Real list lands in the next slice;
+         placeholder kept here so the page structure is finalized. --}}
     <div>
-        <h2 class="text-lg font-semibold mb-3">Projects</h2>
+        <h2 class="text-lg font-semibold mb-3">Accomplishments</h2>
         <div
             class="border border-dashed rounded-lg p-8 text-center text-sm"
             style="border-color: var(--color-surface-input-border); color: var(--color-text-secondary);"
         >
-            Projects UI is coming in the next slice of development.
+            Accomplishments UI is coming in the next slice of development.
         </div>
     </div>
 @endsection

@@ -2,6 +2,27 @@
 
 @section('title', $organization->name . ' — Success')
 
+@php
+    /* Position list: reverse chronological, current first.
+     * The withCount call gives us projects_count on each position.
+     * TODO: when the Accomplishment slice lands, also pull
+     * accomplishments_count and surface it on the row alongside
+     * the project count. */
+    $positions = $organization->positions()
+        ->withCount(['projects' => fn ($q) => $q->whereNull('parent_project_id')])
+        ->orderByRaw('end_date IS NULL DESC')
+        ->orderBy('start_date', 'desc')
+        ->get();
+
+    /* Other projects: top-level (no parent) projects attached directly
+     * to the organization rather than to a specific position. */
+    $otherProjects = $organization->projects()
+        ->whereNull('position_id')
+        ->whereNull('parent_project_id')
+        ->orderBy('name')
+        ->get();
+@endphp
+
 @section('content')
     <div class="mb-2">
         <a href="{{ route('organizations.index') }}" class="link-subtle text-sm">
@@ -94,15 +115,7 @@
         @endif
     </dl>
 
-    {{-- Positions section. Sorted reverse chronological with current
-         positions at the top. --}}
-    @php
-        $positions = $organization->positions()
-            ->orderByRaw('end_date IS NULL DESC')
-            ->orderBy('start_date', 'desc')
-            ->get();
-    @endphp
-
+    {{-- Positions --}}
     <div class="mb-12">
         <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold">Positions</h2>
@@ -144,6 +157,11 @@
                                     @endif
                                 </div>
                                 <div class="flex items-center gap-3 text-xs shrink-0" style="color: var(--color-text-muted);">
+                                    {{-- TODO: when the Accomplishment slice lands, also surface
+                                        the accomplishment count alongside the project count. --}}
+                                    @if ($position->projects_count > 0)
+                                        <span>{{ $position->projects_count }} {{ $position->projects_count === 1 ? 'project' : 'projects' }}</span>
+                                    @endif
                                     <span>
                                         {{ $position->start_date->format('M Y') }} —
                                         {{ $position->end_date ? $position->end_date->format('M Y') : 'Present' }}
@@ -157,17 +175,47 @@
         @endif
     </div>
 
-    {{-- Other projects — projects attached directly to the organization
-         rather than to a specific position. The full UI for this lands
-         in the Project slice; this placeholder reserves the visual
-         space and signals where it'll appear. --}}
+    {{-- Other projects: projects attached directly to the organization
+         (no position). For projects attached to positions, view the
+         position page to see them. --}}
     <div>
-        <h2 class="text-lg font-semibold mb-3">Other projects</h2>
-        <div
-            class="border border-dashed rounded-lg p-8 text-center text-sm"
-            style="border-color: var(--color-surface-input-border); color: var(--color-text-secondary);"
-        >
-            Projects attached directly to this organization (rather than to a specific position) will appear here. UI coming in the next slice.
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold">Other projects</h2>
+            <a href="{{ route('projects.createForOrganization', $organization) }}" class="btn-primary">
+                Add project
+            </a>
         </div>
+
+        @if ($otherProjects->isEmpty())
+            <div
+                class="border border-dashed rounded-lg p-8 text-center text-sm"
+                style="border-color: var(--color-surface-input-border); color: var(--color-text-secondary);"
+            >
+                Projects attached directly to this organization (rather than to a specific position) will appear here. Useful for personal projects, side work, or work that spans multiple roles.
+            </div>
+        @else
+            <ul
+                class="rounded-lg overflow-hidden border"
+                style="border-color: var(--color-surface-input-border); background: var(--color-surface-input);"
+            >
+                @foreach ($otherProjects as $project)
+                    <li class="@if (! $loop->first) border-t @endif" style="border-color: var(--color-divider);">
+                        <a href="{{ route('projects.show', $project) }}" class="list-row">
+                            <div class="flex items-center justify-between gap-4">
+                                <div class="min-w-0">
+                                    <h3 class="font-medium truncate">{{ $project->name }}</h3>
+                                    @if ($project->description)
+                                        <p class="text-sm truncate mt-0.5" style="color: var(--color-text-secondary);">{{ $project->description }}</p>
+                                    @endif
+                                </div>
+                                <div class="flex items-center gap-3 text-xs shrink-0" style="color: var(--color-text-muted);">
+                                    <span class="capitalize">{{ str_replace('_', ' ', $project->visibility) }}</span>
+                                </div>
+                            </div>
+                        </a>
+                    </li>
+                @endforeach
+            </ul>
+        @endif
     </div>
 @endsection
