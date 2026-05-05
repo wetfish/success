@@ -94,13 +94,80 @@
         @endif
     </dl>
 
+    {{-- Positions section. Sorted reverse chronological with current
+         positions at the top. --}}
+    @php
+        $positions = $organization->positions()
+            ->orderByRaw('end_date IS NULL DESC')
+            ->orderBy('start_date', 'desc')
+            ->get();
+    @endphp
+
+    <div class="mb-12">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold">Positions</h2>
+            <a href="{{ route('positions.create', $organization) }}" class="btn-primary">
+                Add position
+            </a>
+        </div>
+
+        @if ($positions->isEmpty())
+            <div
+                class="border border-dashed rounded-lg p-8 text-center text-sm"
+                style="border-color: var(--color-surface-input-border); color: var(--color-text-secondary);"
+            >
+                No positions added yet. The positions you've held at this organization will appear here.
+            </div>
+        @else
+            <ul
+                class="rounded-lg overflow-hidden border"
+                style="border-color: var(--color-surface-input-border); background: var(--color-surface-input);"
+            >
+                @foreach ($positions as $position)
+                    <li class="@if (! $loop->first) border-t @endif" style="border-color: var(--color-divider);">
+                        <a href="{{ route('positions.show', $position) }}" class="list-row">
+                            <div class="flex items-center justify-between gap-4">
+                                <div class="min-w-0">
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        <h3 class="font-medium truncate">{{ $position->title }}</h3>
+                                        @if ($position->isCurrent())
+                                            <span
+                                                class="text-xs font-medium px-2 py-0.5 rounded-full"
+                                                style="background: var(--color-accent); color: var(--color-accent-text);"
+                                            >
+                                                Current
+                                            </span>
+                                        @endif
+                                    </div>
+                                    @if ($position->team_name)
+                                        <p class="text-sm truncate mt-0.5" style="color: var(--color-text-secondary);">{{ $position->team_name }}</p>
+                                    @endif
+                                </div>
+                                <div class="flex items-center gap-3 text-xs shrink-0" style="color: var(--color-text-muted);">
+                                    <span>
+                                        {{ $position->start_date->format('M Y') }} —
+                                        {{ $position->end_date ? $position->end_date->format('M Y') : 'Present' }}
+                                    </span>
+                                </div>
+                            </div>
+                        </a>
+                    </li>
+                @endforeach
+            </ul>
+        @endif
+    </div>
+
+    {{-- Other projects — projects attached directly to the organization
+         rather than to a specific position. The full UI for this lands
+         in the Project slice; this placeholder reserves the visual
+         space and signals where it'll appear. --}}
     <div>
-        <h2 class="text-lg font-semibold mb-3">Positions</h2>
+        <h2 class="text-lg font-semibold mb-3">Other projects</h2>
         <div
             class="border border-dashed rounded-lg p-8 text-center text-sm"
             style="border-color: var(--color-surface-input-border); color: var(--color-text-secondary);"
         >
-            Positions UI is coming in the next slice of development.
+            Projects attached directly to this organization (rather than to a specific position) will appear here. UI coming in the next slice.
         </div>
     </div>
 @endsection

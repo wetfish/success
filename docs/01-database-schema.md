@@ -99,7 +99,6 @@ A specific role at an organization. Multiple positions per organization is allow
 |---|---|---|---|
 | organization_id | bigInteger | no | FK → organizations |
 | title | string | no | |
-| informal_title | string | yes | When the real scope didn't match the official title |
 | employment_type | string | no | Accepted values: `full_time`, `part_time`, `contract`, `freelance`, `internship`, `advisor`, `volunteer`, `founder` |
 | start_date | date | no | |
 | end_date | date | yes | Null = currently in this role |

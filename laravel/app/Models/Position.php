@@ -20,11 +20,15 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * `mandate` field is the deliberate exception — it captures "what you
  * were hired to do," which is genuinely top-down information that
  * doesn't emerge from project data.
+ *
+ * TODO: reports_to_person_id is fillable and the relationship works,
+ * but the field is not yet exposed in the Position form UI pending the
+ * Person UI slice. When Person CRUD lands, add a Person picker to the
+ * form template — no model changes needed at that point.
  */
 #[Fillable([
     'organization_id',
     'title',
-    'informal_title',
     'employment_type',
     'start_date',
     'end_date',
@@ -51,6 +55,16 @@ class Position extends Model
             'team_size_immediate' => 'integer',
             'team_size_extended' => 'integer',
         ];
+    }
+
+    /**
+     * True when this position has no end date — the user is still in
+     * the role. Used to display "Current" badges on lists and to gate
+     * the visibility of reason_for_leaving fields.
+     */
+    public function isCurrent(): bool
+    {
+        return $this->end_date === null;
     }
 
     public function organization(): BelongsTo
