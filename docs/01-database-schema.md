@@ -164,6 +164,7 @@ The unit of evidence. Belongs to either a project or a position, never both, nev
 |---|---|---|---|
 | project_id | bigInteger | yes | FK → projects |
 | position_id | bigInteger | yes | FK → positions. Mutually exclusive with project_id |
+| title | string | no | Short scannable label, used as heading and in lists. Required at the validator level. DB has default `'Untitled Accomplishment'` so existing rows backfill cleanly during migration |
 | description | text | no | What you did |
 | impact_metric | string | yes | "p99 latency", "support ticket volume" |
 | impact_value | string | yes | "47", "$40k", "0" — string so we can hold ranges, percentages, etc. |

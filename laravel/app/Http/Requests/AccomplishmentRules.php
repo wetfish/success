@@ -2,16 +2,6 @@
 
 namespace App\Http\Requests;
 
-/**
- * Shared validation rules and input normalization for Accomplishment
- * form requests.
- *
- * The CONFIDENCE_LABELS and PROMINENCE_LABELS arrays live here as
- * constants because they're used in both views (rendering the slider
- * label) and any future code that needs to display these scores in
- * human terms (e.g., the AI extraction confirmation UI). Single source
- * of truth.
- */
 class AccomplishmentRules
 {
     public const DATING_TYPES = ['date', 'period'];
@@ -37,6 +27,7 @@ class AccomplishmentRules
         return [
             'project_id' => ['nullable', 'integer', 'exists:projects,id'],
             'position_id' => ['nullable', 'integer', 'exists:positions,id'],
+            'title' => ['required', 'string', 'max:120'],
             'description' => ['required', 'string', 'max:5000'],
             'impact_metric' => ['nullable', 'string', 'max:255'],
             'impact_value' => ['nullable', 'string', 'max:255'],
@@ -44,17 +35,32 @@ class AccomplishmentRules
             'confidence' => ['required', 'integer', 'min:1', 'max:5'],
             'prominence' => ['required', 'integer', 'min:1', 'max:5'],
             'context_notes' => ['nullable', 'string', 'max:5000'],
-            'date' => ['nullable', 'date'],
-            'period_start' => ['nullable', 'date'],
+
+            // Dating: exactly one of `date` or `period_start` must be set.
+            // The model layer enforces this as a structural invariant,
+            // but we surface it at the form layer so users get friendly
+            // errors instead of 500s.
+            //
+            // - `required_without` catches the "neither set" case.
+            // - `prohibits` catches the "both set" case. Crucially,
+            //   `prohibits` operates on validated data (post-normalize),
+            //   so stale values cleared by normalize() don't trigger
+            //   false-positive errors.
+            'date' => ['nullable', 'date', 'required_without:period_start', 'prohibits:period_start'],
+            'period_start' => ['nullable', 'date', 'required_without:date'],
             'period_end' => ['nullable', 'date', 'after_or_equal:period_start'],
         ];
     }
 
-    /**
-     * Normalize raw form input. The "dating_type" radio (date vs.
-     * period) drives which fields are kept and which are stripped, so
-     * the model-level XOR validators don't fire on stale field values.
-     */
+    public static function messages(): array
+    {
+        return [
+            'date.required_without' => 'Pick a date or a period of time.',
+            'period_start.required_without' => 'Pick a date or a period of time.',
+            'date.prohibits' => 'Choose either a single date or a period, not both.',
+        ];
+    }
+
     public static function normalize(array $input): array
     {
         $cleaned = [];
@@ -69,8 +75,6 @@ class AccomplishmentRules
             $cleaned[$key] = $value;
         }
 
-        // The dating_type radio determines which date fields apply.
-        // Strip the unused side so the model's XOR validator passes.
         $datingType = $cleaned['dating_type'] ?? null;
 
         if ($datingType === 'date') {
@@ -80,7 +84,6 @@ class AccomplishmentRules
             $cleaned['date'] = null;
         }
 
-        // dating_type itself is a UI helper, not a column.
         unset($cleaned['dating_type']);
 
         return $cleaned;

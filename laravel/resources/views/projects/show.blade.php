@@ -19,10 +19,6 @@
     $startDisplay = $formatProjectDate($project->start_date, $project->date_precision);
     $endDisplay = $formatProjectDate($project->end_date, $project->date_precision);
 
-    /* Accomplishments under this project. Ongoing items (period_start
-     * set, period_end null) float to the top, then the rest sort by
-     * COALESCE(period_end, date) descending so most-recent ends and
-     * point-in-time dates interleave correctly. */
     $accomplishments = $project->accomplishments()
         ->orderByRaw('(period_start IS NOT NULL AND period_end IS NULL) DESC')
         ->orderByRaw('COALESCE(period_end, date) DESC')
@@ -184,7 +180,6 @@
         </div>
     @endif
 
-    {{-- Sub-projects --}}
     <div class="mb-12">
         <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold">Sub-projects</h2>
@@ -226,7 +221,6 @@
         @endif
     </div>
 
-    {{-- Accomplishments --}}
     <div>
         <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold">Accomplishments</h2>
@@ -252,9 +246,9 @@
                         <a href="{{ route('accomplishments.show', $accomplishment) }}" class="list-row">
                             <div class="flex items-start justify-between gap-4">
                                 <div class="min-w-0">
-                                    <h3 class="text-sm leading-snug">{{ \Illuminate\Support\Str::limit($accomplishment->description, 160) }}</h3>
+                                    <h3 class="font-medium truncate">{{ $accomplishment->title }}</h3>
                                     @if ($accomplishment->impact_value)
-                                        <p class="text-xs mt-1" style="color: var(--color-text-secondary);">
+                                        <p class="text-xs mt-0.5" style="color: var(--color-text-secondary);">
                                             {{ $accomplishment->impact_value }}
                                             @if ($accomplishment->impact_unit) {{ $accomplishment->impact_unit }} @endif
                                             @if ($accomplishment->impact_metric) · {{ $accomplishment->impact_metric }} @endif

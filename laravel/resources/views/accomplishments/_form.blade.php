@@ -16,7 +16,29 @@
 @endphp
 
 <div class="space-y-8">
-    {{-- Description — the main field, larger than other textareas --}}
+    {{-- Title — short, scannable, the heading you'd see in a list --}}
+    <div>
+        <label for="title" class="field-label">Title</label>
+        <input
+            type="text"
+            id="title"
+            name="title"
+            value="{{ old('title', $accomplishment->title) }}"
+            required
+            autofocus
+            maxlength="120"
+            placeholder="A short label — what would you call this in a list?"
+            class="input @error('title') has-error @enderror"
+        >
+        @error('title')
+            <p class="field-error">{{ $message }}</p>
+        @enderror
+        <p class="field-help">
+            Short and scannable. One phrase or short sentence — this is what shows up in lists and as the heading.
+        </p>
+    </div>
+
+    {{-- Description — the substantive content, resume-bullet-quality --}}
     <div>
         <label for="description" class="field-label">Description</label>
         <textarea
@@ -24,7 +46,6 @@
             name="description"
             rows="6"
             required
-            autofocus
             placeholder="What you actually did. One or two clear sentences are usually best — this is what becomes a resume bullet."
             class="input @error('description') has-error @enderror"
         >{{ old('description', $accomplishment->description) }}</textarea>
@@ -264,9 +285,6 @@
 
 <script>
     (function () {
-        // Dating type toggle: show only the matching date input group,
-        // disable the others so their stale values don't get submitted
-        // alongside the active group's values.
         const datingRadios = document.querySelectorAll('.dating-type-radio');
         const datingGroups = {
             date: document.getElementById('dating_inputs_date'),
@@ -287,20 +305,15 @@
 
         datingRadios.forEach((radio) => radio.addEventListener('change', updateDatingVisibility));
 
-        // Slider behavior: each slider updates a label element and its
-        // own background-size variable as the value changes. The label's
-        // class swaps too, so the color and weight track the value.
         function setupSlider(slider, labelElement, labels) {
             if (! slider || ! labelElement) return;
 
             function update() {
                 const value = parseInt(slider.value, 10);
                 labelElement.textContent = labels[value] || '';
-                // Update label color/weight class (1-5).
                 labelElement.className = labelElement.className
                     .replace(/slider-label-\d/g, '')
                     .trim() + ' slider-label-' + value;
-                // Update fill percentage on the track.
                 slider.style.setProperty('--slider-fill', ((value - 1) * 25) + '%');
             }
 

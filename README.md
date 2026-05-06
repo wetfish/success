@@ -17,9 +17,9 @@ For the project's mission, design philosophy, and explicit anti-goals, read [`do
 
 ## Status
 
-**Functional MVP, in active development.** The data layer is complete — schema, models, relationships, validation rules, all tested. CRUD interfaces are working for organizations, positions, and projects. You can sit down and enter your employment history end-to-end through the UI today. Accomplishments are the next entity to land, after which the basic data entry milestone is complete.
+**Functional MVP, in active development.** The data entry milestone is complete — you can sit down and enter your full employment history end-to-end through the UI, with structured records for organizations, positions, projects (including sub-projects), and accomplishments.
 
-After that, the AI extraction pipeline is the next major focus: paste raw notes, performance reviews, or a previous resume and get structured project and accomplishment records back to review. That's the moment the project shifts from "Notion replacement" to genuinely useful — manual entry is a bootstrapping step, not the long-term path.
+The AI extraction pipeline is the next major focus: paste raw notes, performance reviews, or a previous resume and get structured project and accomplishment records back to review. That's the moment the project shifts from "Notion replacement" to genuinely useful — manual entry is a bootstrapping step, not the long-term path.
 
 ## Quick Start (Docker)
 

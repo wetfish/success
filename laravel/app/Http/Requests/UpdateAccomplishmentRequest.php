@@ -16,6 +16,11 @@ class UpdateAccomplishmentRequest extends FormRequest
         return AccomplishmentRules::rules();
     }
 
+    public function messages(): array
+    {
+        return AccomplishmentRules::messages();
+    }
+
     protected function prepareForValidation(): void
     {
         $this->merge(AccomplishmentRules::normalize($this->all()));

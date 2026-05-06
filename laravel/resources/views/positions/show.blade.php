@@ -10,9 +10,6 @@
         ->orderBy('start_date', 'desc')
         ->get();
 
-    /* Direct accomplishments — those attached to the position itself,
-     * not to a project under it. Ongoing items first, then by
-     * COALESCE(period_end, date) descending. */
     $directAccomplishments = $position->accomplishments()
         ->orderByRaw('(period_start IS NOT NULL AND period_end IS NULL) DESC')
         ->orderByRaw('COALESCE(period_end, date) DESC')
@@ -135,7 +132,6 @@
         @endif
     </dl>
 
-    {{-- Projects --}}
     <div class="mb-12">
         <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold">Projects</h2>
@@ -180,8 +176,6 @@
         @endif
     </div>
 
-    {{-- Direct accomplishments — not under a project. Used for things
-         like promotions, mentoring, role-level achievements. --}}
     <div>
         <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold">Direct accomplishments</h2>
@@ -207,7 +201,7 @@
                         <a href="{{ route('accomplishments.show', $accomplishment) }}" class="list-row">
                             <div class="flex items-start justify-between gap-4">
                                 <div class="min-w-0">
-                                    <h3 class="text-sm leading-snug">{{ \Illuminate\Support\Str::limit($accomplishment->description, 160) }}</h3>
+                                    <h3 class="font-medium truncate">{{ $accomplishment->title }}</h3>
                                 </div>
                                 <div class="text-xs shrink-0" style="color: var(--color-text-muted);">
                                     @if ($accomplishment->isOngoing())

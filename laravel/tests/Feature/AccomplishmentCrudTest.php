@@ -74,6 +74,7 @@ class AccomplishmentCrudTest extends TestCase
 
         $response = $this->post(route('accomplishments.store'), [
             'project_id' => $project->id,
+            'title' => 'Connection flow',
             'description' => 'Shipped the new connection flow',
             'dating_type' => 'date',
             'date' => '2023-06-15',
@@ -81,7 +82,7 @@ class AccomplishmentCrudTest extends TestCase
             'prominence' => 5,
         ]);
 
-        $accomplishment = Accomplishment::where('description', 'Shipped the new connection flow')->first();
+        $accomplishment = Accomplishment::where('title', 'Connection flow')->first();
         $this->assertNotNull($accomplishment);
         $this->assertSame($project->id, $accomplishment->project_id);
         $this->assertNull($accomplishment->position_id);
@@ -99,6 +100,7 @@ class AccomplishmentCrudTest extends TestCase
 
         $this->post(route('accomplishments.store'), [
             'position_id' => $position->id,
+            'title' => 'Mentorship',
             'description' => 'Mentored two junior engineers',
             'dating_type' => 'period',
             'period_start' => '2023-01-01',
@@ -107,7 +109,7 @@ class AccomplishmentCrudTest extends TestCase
             'prominence' => 3,
         ]);
 
-        $accomplishment = Accomplishment::where('description', 'Mentored two junior engineers')->first();
+        $accomplishment = Accomplishment::where('title', 'Mentorship')->first();
         $this->assertNotNull($accomplishment);
         $this->assertSame($position->id, $accomplishment->position_id);
         $this->assertNull($accomplishment->project_id);
@@ -123,6 +125,7 @@ class AccomplishmentCrudTest extends TestCase
 
         $this->post(route('accomplishments.store'), [
             'position_id' => $position->id,
+            'title' => 'On-call lead',
             'description' => 'Acting as on-call lead',
             'dating_type' => 'period',
             'period_start' => '2024-06-01',
@@ -130,7 +133,7 @@ class AccomplishmentCrudTest extends TestCase
             'prominence' => 3,
         ]);
 
-        $accomplishment = Accomplishment::where('description', 'Acting as on-call lead')->first();
+        $accomplishment = Accomplishment::where('title', 'On-call lead')->first();
         $this->assertNotNull($accomplishment);
         $this->assertNull($accomplishment->period_end);
         $this->assertTrue($accomplishment->isOngoing());
@@ -141,11 +144,10 @@ class AccomplishmentCrudTest extends TestCase
     {
         $project = $this->makeProject($this->makeOrganization());
 
-        // Submit with dating_type=date but also include period values —
-        // they should be stripped, not retained as data alongside the date.
         $this->post(route('accomplishments.store'), [
             'project_id' => $project->id,
-            'description' => 'Stale field test',
+            'title' => 'Stale field test',
+            'description' => 'Testing dating field cleanup',
             'dating_type' => 'date',
             'date' => '2023-06-15',
             'period_start' => '2023-01-01',
@@ -154,11 +156,63 @@ class AccomplishmentCrudTest extends TestCase
             'prominence' => 3,
         ]);
 
-        $accomplishment = Accomplishment::where('description', 'Stale field test')->first();
+        $accomplishment = Accomplishment::where('title', 'Stale field test')->first();
         $this->assertNotNull($accomplishment);
         $this->assertNotNull($accomplishment->date);
         $this->assertNull($accomplishment->period_start);
         $this->assertNull($accomplishment->period_end);
+    }
+
+    /**
+     * Regression test: previously, submitting with no date and no
+     * period_start passed form validation, hit the model's
+     * validateInvariants, and returned a 500 with an
+     * InvalidArgumentException stack trace. The form layer now catches
+     * this case and surfaces it as a normal validation error.
+     */
+    #[Test]
+    public function submitting_without_a_date_or_period_returns_a_validation_error_not_a_500(): void
+    {
+        $project = $this->makeProject($this->makeOrganization());
+
+        $response = $this->post(route('accomplishments.store'), [
+            'project_id' => $project->id,
+            'title' => 'No date test',
+            'description' => 'Body without date or period',
+            'confidence' => 3,
+            'prominence' => 3,
+        ]);
+
+        $response->assertStatus(302); // redirect-with-errors, not 500
+        $response->assertSessionHasErrors('date');
+    }
+
+    /**
+     * Regression test: bypassing the dating_type radio (e.g., by
+     * submitting both date and period_start directly) should be
+     * caught at the form layer rather than letting the model's XOR
+     * validator throw and surface as a 500.
+     */
+    #[Test]
+    public function submitting_both_a_date_and_period_returns_a_validation_error_not_a_500(): void
+    {
+        $project = $this->makeProject($this->makeOrganization());
+
+        // We submit without a dating_type so the normalize step doesn't
+        // strip one of the values. Both reach the validator and trigger
+        // the "not both" rule.
+        $response = $this->post(route('accomplishments.store'), [
+            'project_id' => $project->id,
+            'title' => 'Both date and period',
+            'description' => 'Should fail validation',
+            'date' => '2023-06-15',
+            'period_start' => '2023-01-01',
+            'confidence' => 3,
+            'prominence' => 3,
+        ]);
+
+        $response->assertStatus(302);
+        $response->assertSessionHasErrors('date');
     }
 
     #[Test]
@@ -168,6 +222,7 @@ class AccomplishmentCrudTest extends TestCase
 
         $this->post(route('accomplishments.store'), [
             'project_id' => $project->id,
+            'title' => 'Latency win',
             'description' => 'Reduced p99 latency',
             'impact_metric' => 'p99 latency',
             'impact_value' => '47',
@@ -178,7 +233,7 @@ class AccomplishmentCrudTest extends TestCase
             'prominence' => 5,
         ]);
 
-        $accomplishment = Accomplishment::where('description', 'Reduced p99 latency')->first();
+        $accomplishment = Accomplishment::where('title', 'Latency win')->first();
         $this->assertSame('p99 latency', $accomplishment->impact_metric);
         $this->assertSame('47', $accomplishment->impact_value);
         $this->assertSame('percent reduction', $accomplishment->impact_unit);
@@ -191,6 +246,7 @@ class AccomplishmentCrudTest extends TestCase
 
         $this->post(route('accomplishments.store'), [
             'project_id' => $project->id,
+            'title' => 'Default scoring',
             'description' => 'Default scoring test',
             'dating_type' => 'date',
             'date' => '2023-06-15',
@@ -198,7 +254,7 @@ class AccomplishmentCrudTest extends TestCase
             'prominence' => 3,
         ]);
 
-        $accomplishment = Accomplishment::where('description', 'Default scoring test')->first();
+        $accomplishment = Accomplishment::where('title', 'Default scoring')->first();
         $this->assertSame(3, $accomplishment->confidence);
         $this->assertSame(3, $accomplishment->prominence);
     }
@@ -210,24 +266,56 @@ class AccomplishmentCrudTest extends TestCase
 
         $response = $this->post(route('accomplishments.store'), [
             'project_id' => $project->id,
+            'title' => '',
             'description' => '',
             'confidence' => '',
             'prominence' => '',
         ]);
 
         $response->assertSessionHasErrors([
+            'title',
             'description',
             'confidence',
             'prominence',
         ]);
     }
 
-    /**
-     * Regression test for the same type-comparison class of bug we hit
-     * in the Project sub-project flow. Submits IDs as strings (mimicking
-     * real form input) and confirms the model validators handle them
-     * correctly without false-rejecting.
-     */
+    #[Test]
+    public function title_is_required_for_new_accomplishments(): void
+    {
+        $project = $this->makeProject($this->makeOrganization());
+
+        $response = $this->post(route('accomplishments.store'), [
+            'project_id' => $project->id,
+            'description' => 'Body without a title',
+            'dating_type' => 'date',
+            'date' => '2023-06-15',
+            'confidence' => 3,
+            'prominence' => 3,
+        ]);
+
+        $response->assertSessionHasErrors('title');
+        $this->assertNull(Accomplishment::where('description', 'Body without a title')->first());
+    }
+
+    #[Test]
+    public function title_has_a_max_length_of_120_characters(): void
+    {
+        $project = $this->makeProject($this->makeOrganization());
+
+        $response = $this->post(route('accomplishments.store'), [
+            'project_id' => $project->id,
+            'title' => str_repeat('a', 121),
+            'description' => 'Test',
+            'dating_type' => 'date',
+            'date' => '2023-06-15',
+            'confidence' => 3,
+            'prominence' => 3,
+        ]);
+
+        $response->assertSessionHasErrors('title');
+    }
+
     #[Test]
     public function an_accomplishment_can_be_created_with_string_typed_ids(): void
     {
@@ -235,25 +323,27 @@ class AccomplishmentCrudTest extends TestCase
 
         $response = $this->post(route('accomplishments.store'), [
             'project_id' => (string) $project->id,
-            'description' => 'String ID test',
+            'title' => 'String ID test',
+            'description' => 'Testing string-typed IDs from form submission',
             'dating_type' => 'date',
             'date' => '2023-06-15',
             'confidence' => '3',
             'prominence' => '3',
         ]);
 
-        $accomplishment = Accomplishment::where('description', 'String ID test')->first();
+        $accomplishment = Accomplishment::where('title', 'String ID test')->first();
         $this->assertNotNull($accomplishment);
         $response->assertRedirect(route('accomplishments.show', $accomplishment));
     }
 
     #[Test]
-    public function the_show_page_renders_accomplishment_details(): void
+    public function the_show_page_renders_title_as_heading_and_description_below(): void
     {
         $project = $this->makeProject($this->makeOrganization());
         $accomplishment = Accomplishment::create([
             'project_id' => $project->id,
-            'description' => 'Shipped the connection flow',
+            'title' => 'Connection flow shipped',
+            'description' => 'Shipped the new connection flow with reduced setup time',
             'impact_metric' => 'setup time',
             'impact_value' => '93',
             'impact_unit' => 'percent reduction',
@@ -262,14 +352,21 @@ class AccomplishmentCrudTest extends TestCase
             'prominence' => 5,
         ]);
 
-        $this->get(route('accomplishments.show', $accomplishment))
-            ->assertOk()
-            ->assertSee('Shipped the connection flow')
+        $response = $this->get(route('accomplishments.show', $accomplishment));
+
+        $response->assertOk()
+            ->assertSee('Connection flow shipped')
+            ->assertSee('Shipped the new connection flow with reduced setup time')
             ->assertSee('93')
             ->assertSee('percent reduction')
             ->assertSee('setup time')
-            ->assertSee('Confident') // confidence label for value 4
-            ->assertSee('Featured'); // prominence label for value 5
+            ->assertSee('Confident')
+            ->assertSee('Featured');
+
+        $content = $response->getContent();
+        $titlePos = strpos($content, 'Connection flow shipped');
+        $descPos = strpos($content, 'Shipped the new connection flow');
+        $this->assertLessThan($descPos, $titlePos, 'Title should appear above description on show page');
     }
 
     #[Test]
@@ -278,7 +375,8 @@ class AccomplishmentCrudTest extends TestCase
         $project = $this->makeProject($this->makeOrganization());
         $accomplishment = Accomplishment::create([
             'project_id' => $project->id,
-            'description' => 'To delete',
+            'title' => 'To delete',
+            'description' => 'Will be deleted',
             'date' => '2023-06-15',
             'confidence' => 3,
             'prominence' => 3,
@@ -296,7 +394,8 @@ class AccomplishmentCrudTest extends TestCase
         $position = $this->makePosition($this->makeOrganization());
         $accomplishment = Accomplishment::create([
             'position_id' => $position->id,
-            'description' => 'To delete',
+            'title' => 'To delete',
+            'description' => 'Will be deleted',
             'date' => '2023-06-15',
             'confidence' => 3,
             'prominence' => 3,
@@ -315,6 +414,7 @@ class AccomplishmentCrudTest extends TestCase
 
         Accomplishment::create([
             'project_id' => $project->id,
+            'title' => 'First',
             'description' => 'First accomplishment',
             'date' => '2023-06-15',
             'confidence' => 3,
@@ -323,6 +423,7 @@ class AccomplishmentCrudTest extends TestCase
 
         Accomplishment::create([
             'project_id' => $project->id,
+            'title' => 'Second',
             'description' => 'Second accomplishment',
             'date' => '2023-08-20',
             'confidence' => 3,
@@ -331,8 +432,8 @@ class AccomplishmentCrudTest extends TestCase
 
         $this->get(route('projects.show', $project))
             ->assertOk()
-            ->assertSee('First accomplishment')
-            ->assertSee('Second accomplishment');
+            ->assertSee('First')
+            ->assertSee('Second');
     }
 
     #[Test]
@@ -342,18 +443,18 @@ class AccomplishmentCrudTest extends TestCase
         $position = $this->makePosition($organization);
         $project = $this->makeProject($organization, $position);
 
-        // Direct on position
         Accomplishment::create([
             'position_id' => $position->id,
+            'title' => 'Direct',
             'description' => 'Direct accomplishment',
             'date' => '2023-06-15',
             'confidence' => 3,
             'prominence' => 3,
         ]);
 
-        // Under a project (not directly on position)
         Accomplishment::create([
             'project_id' => $project->id,
+            'title' => 'Project',
             'description' => 'Project accomplishment',
             'date' => '2023-06-15',
             'confidence' => 3,
@@ -363,10 +464,8 @@ class AccomplishmentCrudTest extends TestCase
         $response = $this->get(route('positions.show', $position));
         $content = $response->getContent();
 
-        // Only the direct one should appear in the position's
-        // "Direct accomplishments" section.
         $directSectionPos = strpos($content, 'Direct accomplishments');
-        $directInDirectSection = strpos($content, 'Direct accomplishment', $directSectionPos);
+        $directInDirectSection = strpos($content, 'Direct', $directSectionPos);
         $projectInDirectSection = strpos($content, 'Project accomplishment', $directSectionPos);
 
         $this->assertNotFalse($directInDirectSection);
@@ -378,18 +477,18 @@ class AccomplishmentCrudTest extends TestCase
     {
         $project = $this->makeProject($this->makeOrganization());
 
-        // Completed accomplishment, more recent
         Accomplishment::create([
             'project_id' => $project->id,
+            'title' => 'Completed recent',
             'description' => 'Completed recent',
             'date' => '2024-01-01',
             'confidence' => 3,
             'prominence' => 3,
         ]);
 
-        // Ongoing accomplishment, older start
         Accomplishment::create([
             'project_id' => $project->id,
+            'title' => 'Ongoing older',
             'description' => 'Ongoing older',
             'period_start' => '2022-01-01',
             'confidence' => 3,
@@ -417,6 +516,7 @@ class AccomplishmentCrudTest extends TestCase
 
         Accomplishment::create([
             'position_id' => $position->id,
+            'title' => 'Test',
             'description' => 'Test accomplishment',
             'date' => '2023-06-15',
             'confidence' => 3,

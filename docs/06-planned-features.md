@@ -18,11 +18,11 @@ Each milestone has an "intent" — what done looks like at the level of user val
 
 **Intent:** Migrations, Eloquent models, relationships, and seed data for all v1 entities. The author can run `migrate:fresh --seed` and have a development database to build against. Schema documented in `docs/01-database-schema.md`.
 
-### 3. Basic data entry MVP *(current)*
+### 3. Basic data entry MVP *(complete)*
 
-**Intent:** CRUD interfaces for organizations, positions, projects (including sub-projects), accomplishments, people, links, and tags. The author can enter their actual employment history end-to-end through the UI without dropping into the database. Source-document storage is in place even if the AI extraction pipeline isn't.
+**Intent:** CRUD interfaces for organizations, positions, projects (including sub-projects), and accomplishments. The author can enter their actual employment history end-to-end through the UI without dropping into the database. Source-document storage, links, tags, and people UI deferred — they have schema support and will land alongside or after the AI extraction pipeline as the use case for them emerges.
 
-### 4. AI extraction pipeline
+### 4. AI extraction pipeline *(current)*
 
 **Intent:** Paste raw text (interview prep, brag doc, performance review). Get a draft set of structured records to review, edit, and confirm. Confirmed records get linked back to the source document for traceability.
 

@@ -31,6 +31,7 @@ use InvalidArgumentException;
 #[Fillable([
     'project_id',
     'position_id',
+    'title',
     'description',
     'impact_metric',
     'impact_value',
@@ -71,7 +72,6 @@ class Accomplishment extends Model
      */
     public function validateInvariants(): void
     {
-        // Exactly one of project_id or position_id must be set
         $hasProject = $this->project_id !== null;
         $hasPosition = $this->position_id !== null;
 
@@ -87,7 +87,6 @@ class Accomplishment extends Model
             );
         }
 
-        // Exactly one of date or period_start must be set
         $hasDate = $this->date !== null;
         $hasPeriodStart = $this->period_start !== null;
 
@@ -103,14 +102,12 @@ class Accomplishment extends Model
             );
         }
 
-        // period_end is meaningful only when period_start is set
         if ($this->period_end !== null && $this->period_start === null) {
             throw new InvalidArgumentException(
                 'period_end can only be set when period_start is set.'
             );
         }
 
-        // period_end must be on or after period_start
         if ($this->period_start !== null && $this->period_end !== null) {
             if ($this->period_end->lt($this->period_start)) {
                 throw new InvalidArgumentException(
@@ -119,10 +116,6 @@ class Accomplishment extends Model
             }
         }
 
-        // confidence and prominence range checks. Cast to int first
-        // because form-submitted values may arrive as strings and
-        // strict comparison against integer literals would behave
-        // unpredictably under PHP's type juggling rules.
         if ($this->confidence !== null) {
             $confidence = (int) $this->confidence;
             if ($confidence < 1 || $confidence > 5) {
@@ -142,27 +135,16 @@ class Accomplishment extends Model
         }
     }
 
-    /**
-     * True when this accomplishment is bound to a single point in time.
-     */
     public function isPointInTime(): bool
     {
         return $this->date !== null;
     }
 
-    /**
-     * True when this accomplishment spans a period — either completed
-     * (with period_end) or ongoing (period_end null).
-     */
     public function isSpan(): bool
     {
         return $this->period_start !== null;
     }
 
-    /**
-     * True when this accomplishment is a span without an end date —
-     * it is still ongoing.
-     */
     public function isOngoing(): bool
     {
         return $this->period_start !== null && $this->period_end === null;

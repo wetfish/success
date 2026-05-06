@@ -73,6 +73,14 @@ All numeric form inputs should be cleaned server-side to strip commas, currency 
 
 All forms must display validation errors visibly to the user (typically in red text above or within the form) and preserve `old()` input values so users don't have to retype after a failure.
 
+## Form-Layer vs. Model-Layer Validation
+
+Model-level invariants (the `validateInvariants()` methods on entities) are the structural guarantee — they fire on every save, including programmatic creation in tests, future AI extraction, and tinker commands. They're the floor.
+
+But model-level invariants throw exceptions, and an exception bubbling up from the controller's `Model::create()` call results in a 500 response. For any invariant that can be triggered by user input through a form, there must also be a corresponding form-layer rule so the user gets a friendly validation error instead of a stack trace. The model invariant stays as the structural backstop; the form rule provides the UX.
+
+When writing form-layer cross-field rules, prefer Laravel's built-in cross-field validators (`required_without`, `prohibits`, `prohibited_unless`, etc.) over custom closure rules. Built-in rules operate on the validated/normalized data; closures that read `request()->input(...)` see the raw original request, bypassing any `prepareForValidation()` normalization and producing inconsistent behavior.
+
 ## Schema Conventions
 
 All status and type fields use string columns instead of MySQL ENUMs. ENUMs are difficult to modify in production migrations and cause issues with schema diffing tools. Expected values are documented in the schema docs and enforced in application logic.
