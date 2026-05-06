@@ -17,9 +17,11 @@ For the project's mission, design philosophy, and explicit anti-goals, read [`do
 
 ## Status
 
-**Early development.** The data layer is complete — schema, models, relationships, validation rules, and a passing test suite covering all of it. The next milestone is the basic data entry MVP: forms and views for entering employment history end-to-end. Until then, there's no UI and no way to interact with the app outside of `tinker` or the test suite.
+**Functional MVP, in active development.** The data layer is complete — schema, models, relationships, validation rules, all tested. CRUD interfaces are working for organizations, positions, and projects. You can sit down and enter your employment history end-to-end through the UI today. Accomplishments are the next entity to land, after which the basic data entry milestone is complete.
 
-## Quick Start (Docker — Development)
+After that, the AI extraction pipeline is the next major focus: paste raw notes, performance reviews, or a previous resume and get structured project and accomplishment records back to review. That's the moment the project shifts from "Notion replacement" to genuinely useful — manual entry is a bootstrapping step, not the long-term path.
+
+## Quick Start (Docker)
 
 Start the Docker environment:
 
@@ -27,19 +29,23 @@ Start the Docker environment:
 docker compose up -d
 ```
 
-Run migrations and seed default data:
+Run migrations:
 
 ```bash
-docker compose exec app php artisan migrate --seed
+docker compose exec app php artisan migrate
 ```
 
-Build frontend assets (run from host machine):
+Install frontend dependencies and start the Vite dev server (run from host machine, leave running in a separate terminal):
 
 ```bash
-cd laravel && npm install && npm run build && cd ..
+cd laravel
+npm install
+npm run dev
 ```
 
 Access the app at `http://localhost:8145`.
+
+For production builds, replace `npm run dev` with `npm run build`. The dev server is preferred during active development since it hot-reloads CSS and Blade template changes without manual rebuilds.
 
 ## Docker Environment
 
@@ -64,6 +70,7 @@ All artisan commands run through the `app` container:
 ```bash
 docker compose exec app php artisan migrate
 docker compose exec app php artisan make:model Example -m
+docker compose exec app php artisan test
 docker compose exec app php artisan tinker
 ```
 
@@ -80,8 +87,8 @@ Detailed technical documentation lives in the [`docs/`](docs/) directory:
 - [Mission](docs/00-mission.md) — why we're building this, design philosophy, anti-goals
 - [Database Schema](docs/01-database-schema.md) — table definitions, model relationships, cascade behavior
 - [Services & Commands](docs/02-services-and-commands.md) — service classes, artisan commands, business logic
-- [Routes & Controllers](docs/03-routes-and-controllers.md) — full route listing, controller responsibilities, request flows
-- [Frontend](docs/04-frontend.md) — Tailwind/Vite setup, Blade templates, view structure, UI conventions
+- [Routes & Controllers](docs/03-routes-and-controllers.md) — route structure, controller conventions, form request pattern
+- [Frontend](docs/04-frontend.md) — Tailwind/Vite setup, Blade conventions, design system, component classes
 - [AI Development Notes](docs/05-ai-development-notes.md) — conventions for AI-assisted development with Claude
 - [Planned Features](docs/06-planned-features.md) — milestones, schema design principles, deferred features, and open questions
 
@@ -95,6 +102,6 @@ You can self-host Success on your own infrastructure. You'll need to provide you
 
 ## Contributing
 
-The project is in early planning. The most useful thing you can do right now is read [`docs/00-mission.md`](docs/00-mission.md) and [`docs/06-planned-features.md`](docs/06-planned-features.md), open an issue if something seems wrong-headed, and stick around for when the actual code starts landing.
+The MVP is functional and the patterns are established. New entity types follow the same structure as existing ones (model + form request + controller + Blade views + feature tests), and the design system uses a small set of reusable component classes. Reading through one of the implemented entities — Organization is the simplest, Project the most architecturally interesting — is the fastest way to onboard.
 
 If you've worked on career tools, resume parsers, or AI-powered document generation and have opinions about what works and what doesn't — those opinions are wanted. Open an issue or start a discussion.
