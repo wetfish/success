@@ -3,10 +3,6 @@
 @section('title', $project->name . ' — Success')
 
 @php
-    /**
-     * Format the project's stored date pair according to its date_precision.
-     * Returns a pair of strings ready for display.
-     */
     $formatProjectDate = function ($date, $precision) {
         if (! $date) {
             return null;
@@ -22,6 +18,15 @@
 
     $startDisplay = $formatProjectDate($project->start_date, $project->date_precision);
     $endDisplay = $formatProjectDate($project->end_date, $project->date_precision);
+
+    /* Accomplishments under this project. Ongoing items (period_start
+     * set, period_end null) float to the top, then the rest sort by
+     * COALESCE(period_end, date) descending so most-recent ends and
+     * point-in-time dates interleave correctly. */
+    $accomplishments = $project->accomplishments()
+        ->orderByRaw('(period_start IS NOT NULL AND period_end IS NULL) DESC')
+        ->orderByRaw('COALESCE(period_end, date) DESC')
+        ->get();
 @endphp
 
 @section('content')
@@ -71,7 +76,6 @@
         </div>
     </div>
 
-    {{-- Metadata grid --}}
     <dl class="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5 mb-12 pb-12 border-b" style="border-color: var(--color-divider);">
         <div>
             <dt class="metadata-label">Organization</dt>
@@ -134,7 +138,6 @@
         @endif
     </dl>
 
-    {{-- Story prose --}}
     @if ($project->problem || $project->constraints || $project->approach || $project->outcome || $project->rationale)
         <div class="space-y-8 mb-12 pb-12 border-b" style="border-color: var(--color-divider);">
             @if ($project->problem)
@@ -223,14 +226,55 @@
         @endif
     </div>
 
-    {{-- Accomplishments placeholder --}}
+    {{-- Accomplishments --}}
     <div>
-        <h2 class="text-lg font-semibold mb-3">Accomplishments</h2>
-        <div
-            class="border border-dashed rounded-lg p-8 text-center text-sm"
-            style="border-color: var(--color-surface-input-border); color: var(--color-text-secondary);"
-        >
-            Accomplishments UI is coming in the next slice of development.
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold">Accomplishments</h2>
+            <a href="{{ route('accomplishments.createForProject', $project) }}" class="btn-primary">
+                Add accomplishment
+            </a>
         </div>
+
+        @if ($accomplishments->isEmpty())
+            <div
+                class="border border-dashed rounded-lg p-8 text-center text-sm"
+                style="border-color: var(--color-surface-input-border); color: var(--color-text-secondary);"
+            >
+                No accomplishments yet. Discrete, measurable wins from this project will appear here.
+            </div>
+        @else
+            <ul
+                class="rounded-lg overflow-hidden border"
+                style="border-color: var(--color-surface-input-border); background: var(--color-surface-input);"
+            >
+                @foreach ($accomplishments as $accomplishment)
+                    <li class="@if (! $loop->first) border-t @endif" style="border-color: var(--color-divider);">
+                        <a href="{{ route('accomplishments.show', $accomplishment) }}" class="list-row">
+                            <div class="flex items-start justify-between gap-4">
+                                <div class="min-w-0">
+                                    <h3 class="text-sm leading-snug">{{ \Illuminate\Support\Str::limit($accomplishment->description, 160) }}</h3>
+                                    @if ($accomplishment->impact_value)
+                                        <p class="text-xs mt-1" style="color: var(--color-text-secondary);">
+                                            {{ $accomplishment->impact_value }}
+                                            @if ($accomplishment->impact_unit) {{ $accomplishment->impact_unit }} @endif
+                                            @if ($accomplishment->impact_metric) · {{ $accomplishment->impact_metric }} @endif
+                                        </p>
+                                    @endif
+                                </div>
+                                <div class="text-xs shrink-0" style="color: var(--color-text-muted);">
+                                    @if ($accomplishment->isOngoing())
+                                        Ongoing
+                                    @elseif ($accomplishment->isPointInTime())
+                                        {{ $accomplishment->date->format('M Y') }}
+                                    @else
+                                        {{ $accomplishment->period_end->format('M Y') }}
+                                    @endif
+                                </div>
+                            </div>
+                        </a>
+                    </li>
+                @endforeach
+            </ul>
+        @endif
     </div>
 @endsection

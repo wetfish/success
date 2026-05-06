@@ -21,6 +21,12 @@ use InvalidArgumentException;
  * than at the database level, per the project's "application-level
  * constraints over database-level" principle. This gives clearer
  * error messages and is easier to evolve.
+ *
+ * Note on type handling: confidence and prominence are stored as
+ * integers, but form-submitted values arrive as strings. The validator
+ * casts to int before range comparison so `"3" >= 1` doesn't trigger
+ * PHP's loose comparison rules unpredictably. Same pattern applies to
+ * any future ID equality checks added here.
  */
 #[Fillable([
     'project_id',
@@ -113,19 +119,26 @@ class Accomplishment extends Model
             }
         }
 
-        // confidence and prominence range checks
-        if ($this->confidence !== null
-            && ($this->confidence < 1 || $this->confidence > 5)) {
-            throw new InvalidArgumentException(
-                'confidence must be an integer between 1 and 5.'
-            );
+        // confidence and prominence range checks. Cast to int first
+        // because form-submitted values may arrive as strings and
+        // strict comparison against integer literals would behave
+        // unpredictably under PHP's type juggling rules.
+        if ($this->confidence !== null) {
+            $confidence = (int) $this->confidence;
+            if ($confidence < 1 || $confidence > 5) {
+                throw new InvalidArgumentException(
+                    'confidence must be an integer between 1 and 5.'
+                );
+            }
         }
 
-        if ($this->prominence !== null
-            && ($this->prominence < 1 || $this->prominence > 5)) {
-            throw new InvalidArgumentException(
-                'prominence must be an integer between 1 and 5.'
-            );
+        if ($this->prominence !== null) {
+            $prominence = (int) $this->prominence;
+            if ($prominence < 1 || $prominence > 5) {
+                throw new InvalidArgumentException(
+                    'prominence must be an integer between 1 and 5.'
+                );
+            }
         }
     }
 

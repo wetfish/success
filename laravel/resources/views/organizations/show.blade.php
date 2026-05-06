@@ -3,19 +3,19 @@
 @section('title', $organization->name . ' — Success')
 
 @php
-    /* Position list: reverse chronological, current first.
-     * The withCount call gives us projects_count on each position.
-     * TODO: when the Accomplishment slice lands, also pull
-     * accomplishments_count and surface it on the row alongside
-     * the project count. */
+    /* Position list with both project and accomplishment counts.
+     * Counts include only direct counts (top-level projects, direct
+     * accomplishments not under projects), since those are the items
+     * scoped to the position itself. */
     $positions = $organization->positions()
-        ->withCount(['projects' => fn ($q) => $q->whereNull('parent_project_id')])
+        ->withCount([
+            'projects' => fn ($q) => $q->whereNull('parent_project_id'),
+            'accomplishments',
+        ])
         ->orderByRaw('end_date IS NULL DESC')
         ->orderBy('start_date', 'desc')
         ->get();
 
-    /* Other projects: top-level (no parent) projects attached directly
-     * to the organization rather than to a specific position. */
     $otherProjects = $organization->projects()
         ->whereNull('position_id')
         ->whereNull('parent_project_id')
@@ -115,7 +115,6 @@
         @endif
     </dl>
 
-    {{-- Positions --}}
     <div class="mb-12">
         <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold">Positions</h2>
@@ -157,10 +156,11 @@
                                     @endif
                                 </div>
                                 <div class="flex items-center gap-3 text-xs shrink-0" style="color: var(--color-text-muted);">
-                                    {{-- TODO: when the Accomplishment slice lands, also surface
-                                        the accomplishment count alongside the project count. --}}
                                     @if ($position->projects_count > 0)
                                         <span>{{ $position->projects_count }} {{ $position->projects_count === 1 ? 'project' : 'projects' }}</span>
+                                    @endif
+                                    @if ($position->accomplishments_count > 0)
+                                        <span>{{ $position->accomplishments_count }} {{ $position->accomplishments_count === 1 ? 'accomplishment' : 'accomplishments' }}</span>
                                     @endif
                                     <span>
                                         {{ $position->start_date->format('M Y') }} —
@@ -175,9 +175,6 @@
         @endif
     </div>
 
-    {{-- Other projects: projects attached directly to the organization
-         (no position). For projects attached to positions, view the
-         position page to see them. --}}
     <div>
         <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold">Other projects</h2>

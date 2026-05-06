@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AccomplishmentController;
 use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\ProjectController;
@@ -9,25 +10,13 @@ Route::get('/', fn () => redirect()->route('organizations.index'));
 
 Route::resource('organizations', OrganizationController::class);
 
-/* Positions are always created in the context of an organization, so
- * the create form route is nested under organizations. The remaining
- * routes (store, show, edit, update, destroy) are flat — once a
- * position exists, it has its own identity and doesn't need the
- * organization in the URL. */
+/* Positions are always created in the context of an organization. */
 Route::get('organizations/{organization}/positions/create', [PositionController::class, 'create'])
     ->name('positions.create');
 
 Route::resource('positions', PositionController::class)->except(['index', 'create']);
 
-/* Projects have three create entry points, depending on what the
- * project attaches to:
- *   - Organization-level (no position)
- *   - Position-level (attached to a specific role)
- *   - Sub-project of an existing project
- *
- * The contextual fields (organization_id, position_id, parent_project_id)
- * are auto-set based on which entry point was used. The user can edit
- * them later via the standard edit form. */
+/* Projects have three create entry points. */
 Route::get('organizations/{organization}/projects/create', [ProjectController::class, 'createForOrganization'])
     ->name('projects.createForOrganization');
 
@@ -38,3 +27,15 @@ Route::get('projects/{project}/sub-projects/create', [ProjectController::class, 
     ->name('projects.createSubProject');
 
 Route::resource('projects', ProjectController::class)->except(['index', 'create']);
+
+/* Accomplishments have two create entry points: from a project (the
+ * common case — accomplishments are evidence within projects) or
+ * directly from a position (for things like promotions, mentoring, or
+ * other role-level achievements that aren't tied to a discrete project). */
+Route::get('projects/{project}/accomplishments/create', [AccomplishmentController::class, 'createForProject'])
+    ->name('accomplishments.createForProject');
+
+Route::get('positions/{position}/accomplishments/create', [AccomplishmentController::class, 'createForPosition'])
+    ->name('accomplishments.createForPosition');
+
+Route::resource('accomplishments', AccomplishmentController::class)->except(['index', 'create']);

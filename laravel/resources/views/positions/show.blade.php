@@ -9,6 +9,14 @@
         ->orderByRaw('end_date IS NULL DESC')
         ->orderBy('start_date', 'desc')
         ->get();
+
+    /* Direct accomplishments — those attached to the position itself,
+     * not to a project under it. Ongoing items first, then by
+     * COALESCE(period_end, date) descending. */
+    $directAccomplishments = $position->accomplishments()
+        ->orderByRaw('(period_start IS NOT NULL AND period_end IS NULL) DESC')
+        ->orderByRaw('COALESCE(period_end, date) DESC')
+        ->get();
 @endphp
 
 @section('content')
@@ -127,9 +135,7 @@
         @endif
     </dl>
 
-    {{-- Projects under this position. Only top-level projects are shown
-         here; sub-projects appear nested under their parent's show page.
-         Sorted reverse chronological with active projects first. --}}
+    {{-- Projects --}}
     <div class="mb-12">
         <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold">Projects</h2>
@@ -174,15 +180,49 @@
         @endif
     </div>
 
-    {{-- Accomplishments placeholder. Real list lands in the next slice;
-         placeholder kept here so the page structure is finalized. --}}
+    {{-- Direct accomplishments — not under a project. Used for things
+         like promotions, mentoring, role-level achievements. --}}
     <div>
-        <h2 class="text-lg font-semibold mb-3">Accomplishments</h2>
-        <div
-            class="border border-dashed rounded-lg p-8 text-center text-sm"
-            style="border-color: var(--color-surface-input-border); color: var(--color-text-secondary);"
-        >
-            Accomplishments UI is coming in the next slice of development.
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold">Direct accomplishments</h2>
+            <a href="{{ route('accomplishments.createForPosition', $position) }}" class="btn-primary">
+                Add accomplishment
+            </a>
         </div>
+
+        @if ($directAccomplishments->isEmpty())
+            <div
+                class="border border-dashed rounded-lg p-8 text-center text-sm"
+                style="border-color: var(--color-surface-input-border); color: var(--color-text-secondary);"
+            >
+                Accomplishments tied directly to this role rather than to a specific project will appear here. Useful for promotions, mentoring, and other role-level wins.
+            </div>
+        @else
+            <ul
+                class="rounded-lg overflow-hidden border"
+                style="border-color: var(--color-surface-input-border); background: var(--color-surface-input);"
+            >
+                @foreach ($directAccomplishments as $accomplishment)
+                    <li class="@if (! $loop->first) border-t @endif" style="border-color: var(--color-divider);">
+                        <a href="{{ route('accomplishments.show', $accomplishment) }}" class="list-row">
+                            <div class="flex items-start justify-between gap-4">
+                                <div class="min-w-0">
+                                    <h3 class="text-sm leading-snug">{{ \Illuminate\Support\Str::limit($accomplishment->description, 160) }}</h3>
+                                </div>
+                                <div class="text-xs shrink-0" style="color: var(--color-text-muted);">
+                                    @if ($accomplishment->isOngoing())
+                                        Ongoing
+                                    @elseif ($accomplishment->isPointInTime())
+                                        {{ $accomplishment->date->format('M Y') }}
+                                    @else
+                                        {{ $accomplishment->period_end->format('M Y') }}
+                                    @endif
+                                </div>
+                            </div>
+                        </a>
+                    </li>
+                @endforeach
+            </ul>
+        @endif
     </div>
 @endsection
