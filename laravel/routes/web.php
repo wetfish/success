@@ -1,12 +1,23 @@
 <?php
 
 use App\Http\Controllers\AccomplishmentController;
+use App\Http\Controllers\CareerInputController;
 use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\ProjectController;
+use App\Http\Controllers\SourceDocumentController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', fn () => redirect()->route('organizations.index'));
+/* The home page is the AI extraction input. Users land here to paste
+ * their career notes or upload a file; the page also lists all source
+ * documents previously submitted. The extraction trigger and form
+ * submission handler get wired up in the next slice. */
+Route::get('/', [CareerInputController::class, 'index'])->name('career-input.index');
+
+/* Source documents — view-only for now. Editing, deleting, and
+ * triggering re-extraction come in later slices. */
+Route::get('source-documents/{sourceDocument}', [SourceDocumentController::class, 'show'])
+    ->name('source-documents.show');
 
 Route::resource('organizations', OrganizationController::class);
 
