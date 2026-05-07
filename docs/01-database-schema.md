@@ -56,7 +56,7 @@ A separate table from day one rather than columns on `organizations`, because or
 | round_name | string | no | Free text — "Seed", "Series A", "Series B", "IPO", "Bootstrapped" |
 | round_date | date | yes | |
 | amount_raised | unsignedBigInteger | yes | Stored in cents |
-| currency | string | yes | ISO 4217 code (e.g., "USD"). Defaults to `"USD"` in the model layer |
+| currency | string | yes | ISO 4217 code (e.g., "USD") |
 | lead_investor | string | yes | |
 | notes | text | yes | |
 
@@ -102,7 +102,7 @@ A specific role at an organization. Multiple positions per organization is allow
 | employment_type | string | no | Accepted values: `full_time`, `part_time`, `contract`, `freelance`, `internship`, `advisor`, `volunteer`, `founder` |
 | start_date | date | no | |
 | end_date | date | yes | Null = currently in this role |
-| location_arrangement | string | no | Accepted values: `remote`, `hybrid`, `onsite` |
+| location_arrangement | string | no | Accepted values: `remote`, `hybrid`, `on_site` |
 | location_text | string | yes | Free text — "Global team, distributed", "SF HQ, hybrid 2x/week" |
 | team_name | string | yes | "Terminal Web team", "Platform Infra" |
 | team_size_immediate | smallInteger | yes | |
@@ -276,19 +276,23 @@ Some types are context-specific (e.g., `slack` makes sense for organizations but
 
 #### `source_documents`
 
-For the "paste your notes" entry path. Raw, unstructured text gets stored here and structured records get extracted from it.
+For the "paste your notes" entry path. Raw, unstructured text or uploaded files get stored here, and structured records get extracted from them.
 
 | Column | Type | Nullable | Notes |
 |---|---|---|---|
 | title | string | yes | |
 | kind | string | no | Accepted values: `interview_prep`, `performance_review`, `brag_doc`, `journal`, `meeting_notes`, `other` |
-| body | text | no | The raw notes verbatim |
+| file_path | string | yes | Relative storage path for uploaded files. Null for pasted text |
+| file_type | string | yes | Accepted values: `text`, `markdown`, `pdf`. Null for pasted text (treated as `text`) |
+| body | text | no | The textual body. For pasted text, the literal pasted content. For uploaded text and markdown files, the file contents read into the column at upload time. For PDFs, the extracted plain text fallback (PDFs are sent directly to Claude rather than read here) |
 | context_date | date | yes | When the notes were written |
 | context_notes | text | yes | What occasion ("Interview prep for Stripe, Aug 2025") |
 
-**Relationships.** `belongsToMany` accomplishments via `accomplishment_source_documents`. `belongsToMany` projects via `project_source_documents`. `morphedByMany` tags via `taggables`.
+**Relationships.** `belongsToMany` accomplishments via `accomplishment_source_documents`. `belongsToMany` projects via `project_source_documents`. `morphedByMany` tags via `taggables`. `hasMany` extracted_records. `hasMany` ai_usage_events.
 
 **Notes.** Source documents are the audit trail for AI-extracted records. When a project or accomplishment is created via the extraction pipeline, the relationship to its originating source document is recorded so the user can re-extract later if the schema evolves, and so the original voice and texture is preserved beyond what makes it into normalized fields.
+
+**Extraction status is derived, not stored.** A document's status (`pending`, `completed`, `failed`) is computed from related tables — see the `isPending()`, `isCompleted()`, `isFailed()` methods on the model. This avoids the column drifting out of sync with reality. The trade-off is a small query cost on each status check; revisit if heavy index pages need it cached.
 
 #### `accomplishment_source_documents` (join)
 
@@ -311,6 +315,59 @@ For the "paste your notes" entry path. Raw, unstructured text gets stored here a
 **Cascade.** Both FKs → `cascade`.
 
 Two separate join tables (rather than one polymorphic one) because there are only two extractable entity types in MVP and flat join tables are easier to query than polymorphic ones for relationships this simple.
+
+---
+
+### AI extraction pipeline
+
+The tables that support the extraction pipeline — turning raw `source_documents` into reviewable drafts that become real records once the user confirms.
+
+#### `extracted_records`
+
+Drafts produced by AI extraction. Stays in this staging table until the user confirms (the draft becomes a real organization/position/project/accomplishment), rejects (the draft is discarded), or merges (the draft is combined with an existing record).
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| source_document_id | bigInteger | no | FK → source_documents |
+| record_type | string | no | Accepted values: `organization`, `position`, `project`, `accomplishment` |
+| payload | json | no | The draft's would-be field values, shape depends on record_type |
+| status | string | no | Accepted values: `pending`, `confirmed`, `rejected`, `merged`. Default `pending` |
+| match_record_type | string | yes | Eloquent model class name, when duplicate detection finds a candidate match |
+| match_record_id | bigInteger | yes | ID of the matched record |
+
+**Relationships.** `belongsTo` source_document.
+
+**Cascade.** `source_document_id` → `cascade`. Deleting the source document discards its drafts.
+
+**Indexes.** Compound index on `(source_document_id, status)` for fast review-queue lookups. Index on `record_type`.
+
+**Notes.** Drafts deliberately live in their own table rather than as soft-statused real records. This keeps the rest of the app simple — every existing query against organizations/positions/projects/accomplishments continues to work without filtering for "real vs draft" status. The trade-off is a small amount of conversion logic at confirmation time (read draft payload → create real record).
+
+The match fields use a polymorphic-style pair (`match_record_type` + `match_record_id`) rather than a formal Laravel `morphTo` relationship. We only need read access from app code, and the formal morph adds query overhead we don't need.
+
+#### `ai_usage_events`
+
+Records every AI API call: which provider, what operation, how many tokens, what it cost. Lets us answer "how much have I spent this month" and "is text extraction or PDF extraction more expensive per document" without wiring up the AI provider's billing API.
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| provider | string | no | Provider identifier — currently `claude`, future providers add their own names |
+| model | string | no | Model identifier (e.g., `claude-sonnet-4-6`) |
+| operation | string | no | Accepted values: `extract_text`, `extract_pdf`, `synthesize`, `count_tokens`, `health_check` |
+| source_document_id | bigInteger | yes | FK → source_documents. Null for operations not tied to a specific document (health checks, etc.) |
+| input_tokens | unsignedInteger | no | Default `0` |
+| output_tokens | unsignedInteger | no | Default `0` |
+| cost_cents | unsignedBigInteger | no | Cost in cents per the Money helper convention. Default `0` |
+| success | boolean | no | Default `true`. Set to `false` for failed calls, with `error_message` populated |
+| error_message | text | yes | Failure detail when `success = false` |
+
+**Relationships.** `belongsTo` source_document.
+
+**Cascade.** `source_document_id` → `set null`. Usage records survive the deletion of the source document they were tied to — we want to retain cost telemetry even if the underlying document is gone.
+
+**Indexes.** Index on `provider`, `operation`, and `created_at` for typical reporting queries ("usage this week," "cost by operation type").
+
+**Notes.** `cost_cents` is computed at call time from `input_tokens × input_rate + output_tokens × output_rate`. Provider rates are configured in `config/services.php` (`extraction.input_cost_per_mtok_cents` and `extraction.output_cost_per_mtok_cents`). When provider pricing changes, only new records reflect the new rates — historical records stay accurate to what the call actually cost.
 
 ---
 
@@ -389,6 +446,8 @@ For quick reference, here's every foreign key and what happens on parent deletio
 | `career_theme_projects` (both sides) | cascade |
 | `career_theme_accomplishments` (both sides) | cascade |
 | `accomplishment_collaborators` (both sides) | cascade |
+| `extracted_records.source_document_id` → source_documents | cascade |
+| `ai_usage_events.source_document_id` → source_documents | set null |
 
 **A note on soft deletes vs. cascade.** When an entity is *soft-deleted* (`deleted_at` set), child rows are not affected — they remain pointing at a soft-deleted parent. Eloquent's default behavior excludes soft-deleted records from queries, so children effectively "orphan" until either the parent is restored (relationships work again) or the parent is hard-deleted (cascade fires). This is intentional: it makes accidental-delete recovery clean and predictable.
 

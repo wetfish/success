@@ -81,6 +81,14 @@ But model-level invariants throw exceptions, and an exception bubbling up from t
 
 When writing form-layer cross-field rules, prefer Laravel's built-in cross-field validators (`required_without`, `prohibits`, `prohibited_unless`, etc.) over custom closure rules. Built-in rules operate on the validated/normalized data; closures that read `request()->input(...)` see the raw original request, bypassing any `prepareForValidation()` normalization and producing inconsistent behavior.
 
+## Verify Before You Write
+
+Before writing or editing code that references any existing column, model, method, or relationship by name, read the actual file. Do not rely on conversation context, mental models built up over a session, or previous summaries. Names drift over time: columns get renamed, fields get dropped, methods get refactored. A name that *seems* obvious is often the most dangerous because it bypasses verification instinct.
+
+Concrete rule: when a new file touches an existing entity, the first action is to view that entity's migration and model. When editing an existing file, re-view it immediately before each edit; previously-rendered file contents in conversation history may be stale after intermediate changes.
+
+This applies especially when re-establishing context after a long session, after a memory compaction, or after pulling fresh code from the repo. The cost of an extra `view` call is near-zero; the cost of writing code against an imagined schema is real debugging time, partial migrations leaving the database in a broken state, and rework.
+
 ## Schema Conventions
 
 All status and type fields use string columns instead of MySQL ENUMs. ENUMs are difficult to modify in production migrations and cause issues with schema diffing tools. Expected values are documented in the schema docs and enforced in application logic.
