@@ -49,9 +49,25 @@
     </dl>
 
     <div>
-        <h2 class="section-heading mb-4">Body</h2>
-
-        @if ($sourceDocument->body)
+        @if ($sourceDocument->isPdf())
+            {{-- PDF documents are embedded inline so the user can
+                 view the original. The download link is a fallback
+                 for browsers that can't render PDFs inline. --}}
+            <h2 class="section-heading mb-4">PDF</h2>
+            <iframe
+                src="{{ route('source-documents.file', $sourceDocument) }}"
+                class="w-full rounded-lg border"
+                style="height: 600px; background: var(--color-surface-input); border-color: var(--color-surface-input-border);"
+                title="{{ $sourceDocument->title ?: 'PDF source document' }}"
+            ></iframe>
+            <p class="mt-2 text-xs" style="color: var(--color-text-muted);">
+                Can't see the PDF?
+                <a href="{{ route('source-documents.file', ['sourceDocument' => $sourceDocument, 'download' => 1]) }}" class="link-subtle">
+                    Download the original
+                </a>
+            </p>
+        @elseif ($sourceDocument->body)
+            <h2 class="section-heading mb-4">Body</h2>
             {{-- whitespace-pre-line preserves line breaks the user typed
                  while still allowing wrapping on long lines. The faint
                  surface mirrors how the body looked in the input
@@ -61,8 +77,9 @@
                 style="background: var(--color-surface-input); border-color: var(--color-surface-input-border); color: var(--color-text-primary);"
             >{{ $sourceDocument->body }}</div>
         @else
+            <h2 class="section-heading mb-4">Body</h2>
             <p class="text-sm" style="color: var(--color-text-muted);">
-                No body content. (PDF source documents store their content as a file rather than text.)
+                No body content.
             </p>
         @endif
     </div>

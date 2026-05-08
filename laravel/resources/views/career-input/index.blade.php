@@ -13,18 +13,21 @@
     </div>
 
     {{-- The submission form. Posts to source-documents.store which
-         creates the document, generates a title via AI, and redirects
-         to the preview page where the user confirms the extraction.
-         File upload UI is rendered but disabled — submission with a
-         file is not yet supported (next slice). --}}
-    <form action="{{ route('source-documents.store') }}" method="POST" class="mb-12" data-input-form>
+         creates the document, generates a title via AI (for pasted
+         text) or derives one from the filename (for uploads), then
+         redirects to the preview page where the user confirms the
+         extraction. --}}
+    <form action="{{ route('source-documents.store') }}" method="POST" enctype="multipart/form-data" class="mb-12" data-input-form>
         @csrf
 
-        <div class="input-region">
+        <div class="input-region" data-drop-zone>
             <div class="input-region-inner">
-                {{-- Text body input. Required for now since file
-                     upload is deferred to the next slice. --}}
-                <div>
+                {{-- Mode toggle is implicit: when a file is selected,
+                     the textarea is replaced with a file preview. When
+                     the file is removed, the textarea returns. The
+                     mutual exclusion of body/upload is enforced by
+                     server-side validation regardless of the UI state. --}}
+                <div data-text-mode>
                     <label for="body" class="sr-only">Career notes</label>
                     <textarea
                         id="body"
@@ -34,23 +37,70 @@
                         class="input-textarea"
                     >{{ old('body') }}</textarea>
                 </div>
+
+                <div data-file-mode hidden>
+                    <div class="input-file-preview">
+                        <div class="input-file-preview-icon" aria-hidden="true">
+                            <svg width="32" height="40" viewBox="0 0 32 40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+                                <path d="M3 1h18l8 8v29a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"/>
+                                <path d="M21 1v8h8"/>
+                            </svg>
+                        </div>
+                        <div class="input-file-preview-meta">
+                            <p class="input-file-preview-name" data-file-name>filename.pdf</p>
+                            <p class="input-file-preview-size" data-file-size>—</p>
+                        </div>
+                        <button
+                            type="button"
+                            class="input-file-preview-remove"
+                            aria-label="Remove file"
+                            data-file-remove
+                        >
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                                <line x1="2" y1="2" x2="12" y2="12"/>
+                                <line x1="12" y1="2" x2="2" y2="12"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                {{-- Hidden file input. The visible paperclip button
+                     and drag-and-drop both pipe selected files into
+                     this input so a normal form submission carries
+                     the file along. --}}
+                <input
+                    type="file"
+                    name="upload"
+                    id="upload"
+                    accept=".pdf,.txt,.md"
+                    class="sr-only"
+                    data-file-input
+                >
+
+                {{-- Drag overlay shown only while a file is being
+                     dragged anywhere over the page. Sits on top of
+                     the textarea/file preview so the user has
+                     unambiguous "drop here" feedback. --}}
+                <div class="input-drop-overlay" data-drop-overlay aria-hidden="true">
+                    <p>Drop your file to upload</p>
+                </div>
             </div>
 
             <div class="input-region-toolbar">
                 <div class="input-region-toolbar-left">
                     <button
                         type="button"
-                        class="paperclip-btn is-disabled"
-                        aria-label="Attach a file (coming soon)"
-                        title="File upload coming soon"
-                        disabled
+                        class="paperclip-btn"
+                        aria-label="Attach a file"
+                        data-file-trigger
                     >
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
                         </svg>
                     </button>
                     <p class="input-region-hint">
-                        File upload coming soon — paste your notes for now
+                        <span data-hint-default>PDF, .txt, or .md — up to 10MB</span>
+                        <span data-hint-active hidden>File ready to submit</span>
                     </p>
                 </div>
                 <button type="submit" class="btn-primary" data-submit-button>
@@ -60,6 +110,9 @@
         </div>
 
         @error('body')
+            <p class="field-error mt-2">{{ $message }}</p>
+        @enderror
+        @error('upload')
             <p class="field-error mt-2">{{ $message }}</p>
         @enderror
     </form>
@@ -120,32 +173,130 @@
         @endif
     </div>
 
-    {{-- Career-input page interactions. File upload handling is
-         deferred to a later slice — for now the only client-side
-         behavior is showing the loading overlay on form submit so
-         the user has feedback during the title generation step. --}}
+    {{-- Career-input page interactions: drag-and-drop, file selection,
+         text/file mode toggling, and the loading overlay on submit.
+         Plain DOM API, IIFE-scoped. --}}
     <script>
         (function () {
             const form = document.querySelector('[data-input-form]');
             const overlay = document.querySelector('[data-loading-overlay]');
-            const submitBtn = form?.querySelector('[data-submit-button]');
-            const textarea = form?.querySelector('textarea[name="body"]');
+            if (!form || !overlay) return;
 
-            if (!form || !overlay || !submitBtn || !textarea) return;
+            const submitBtn = form.querySelector('[data-submit-button]');
+            const textarea = form.querySelector('textarea[name="body"]');
+            const dropOverlay = form.querySelector('[data-drop-overlay]');
+            const fileInput = form.querySelector('[data-file-input]');
+            const fileTrigger = form.querySelector('[data-file-trigger]');
+            const fileRemove = form.querySelector('[data-file-remove]');
+            const textMode = form.querySelector('[data-text-mode]');
+            const fileMode = form.querySelector('[data-file-mode]');
+            const fileName = form.querySelector('[data-file-name]');
+            const fileSize = form.querySelector('[data-file-size]');
+            const hintDefault = form.querySelector('[data-hint-default]');
+            const hintActive = form.querySelector('[data-hint-active]');
 
-            // Disable submit when the body is empty so the user can't
-            // submit nothing and burn through validation cycles. This
-            // is a UX nicety — the server still validates required.
+            // Submit-button enabled state. Enabled when the textarea
+            // has content OR a file is selected. Updated on every
+            // input change and when files are added/removed.
             function syncSubmitState() {
-                submitBtn.disabled = textarea.value.trim() === '';
+                const hasText = textarea.value.trim() !== '';
+                const hasFile = fileInput.files && fileInput.files.length > 0;
+                submitBtn.disabled = !hasText && !hasFile;
             }
             syncSubmitState();
             textarea.addEventListener('input', syncSubmitState);
 
+            // Open the file picker when the paperclip is clicked.
+            fileTrigger.addEventListener('click', () => fileInput.click());
+
+            // When a file is selected via the picker, swap to file mode.
+            fileInput.addEventListener('change', () => {
+                if (fileInput.files && fileInput.files[0]) {
+                    showFile(fileInput.files[0]);
+                }
+            });
+
+            // Remove the attached file and revert to text mode.
+            fileRemove.addEventListener('click', () => {
+                fileInput.value = '';
+                textMode.hidden = false;
+                fileMode.hidden = true;
+                hintDefault.hidden = false;
+                hintActive.hidden = true;
+                syncSubmitState();
+                textarea.focus();
+            });
+
+            // Page-wide drag tracking. We count enter/leave events
+            // because dragenter/dragleave fire on every child element,
+            // which would make a naive show/hide flicker. The depth
+            // counter is the canonical fix.
+            let dragDepth = 0;
+
+            ['dragenter', 'dragover'].forEach(evt => {
+                document.addEventListener(evt, (e) => {
+                    if (!hasFiles(e)) return;
+                    e.preventDefault();
+                    dragDepth++;
+                    dropOverlay.classList.add('is-visible');
+                });
+            });
+
+            ['dragleave', 'drop'].forEach(evt => {
+                document.addEventListener(evt, (e) => {
+                    if (!hasFiles(e)) return;
+                    e.preventDefault();
+                    dragDepth = Math.max(0, dragDepth - 1);
+                    if (dragDepth === 0) {
+                        dropOverlay.classList.remove('is-visible');
+                    }
+                });
+            });
+
+            // Handle the actual drop. Capture the file, populate the
+            // hidden file input (so normal form submission carries
+            // it along), reset the drag counter.
+            document.addEventListener('drop', (e) => {
+                if (!hasFiles(e)) return;
+                e.preventDefault();
+                dragDepth = 0;
+                dropOverlay.classList.remove('is-visible');
+
+                const file = e.dataTransfer.files[0];
+                if (!file) return;
+
+                const dt = new DataTransfer();
+                dt.items.add(file);
+                fileInput.files = dt.files;
+                showFile(file);
+            });
+
+            // Show the loading overlay on submit. The overlay stays
+            // visible until the browser navigates to the response.
             form.addEventListener('submit', () => {
                 overlay.classList.add('is-visible');
                 overlay.removeAttribute('aria-hidden');
             });
+
+            function hasFiles(e) {
+                return e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+            }
+
+            function showFile(file) {
+                fileName.textContent = file.name;
+                fileSize.textContent = formatSize(file.size);
+                textMode.hidden = true;
+                fileMode.hidden = false;
+                hintDefault.hidden = true;
+                hintActive.hidden = false;
+                syncSubmitState();
+            }
+
+            function formatSize(bytes) {
+                if (bytes < 1024) return bytes + ' B';
+                if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+                return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+            }
         })();
     </script>
 @endsection

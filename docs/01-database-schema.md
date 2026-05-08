@@ -284,7 +284,7 @@ For the "paste your notes" entry path. Raw, unstructured text or uploaded files 
 | kind | string | no | Accepted values: `interview_prep`, `performance_review`, `brag_doc`, `journal`, `meeting_notes`, `other` |
 | file_path | string | yes | Relative storage path for uploaded files. Null for pasted text |
 | file_type | string | yes | Accepted values: `text`, `markdown`, `pdf`. Null for pasted text (treated as `text`) |
-| body | text | no | The textual body. For pasted text, the literal pasted content. For uploaded text and markdown files, the file contents read into the column at upload time. For PDFs, the extracted plain text fallback (PDFs are sent directly to Claude rather than read here) |
+| body | text | yes | The textual body. For pasted text, the literal pasted content. For uploaded text and markdown files, the file contents read into the column at upload time. Null for PDF uploads — the file at `file_path` is the source, sent directly to Claude as base64 at extraction time |
 | context_date | date | yes | When the notes were written |
 | context_notes | text | yes | What occasion ("Interview prep for Stripe, Aug 2025") |
 

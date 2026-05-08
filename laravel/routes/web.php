@@ -20,6 +20,10 @@ Route::get('/', [CareerInputController::class, 'index'])->name('career-input.ind
  *   GET  /source-documents/{id}/preview             → cost preview page
  *   POST /source-documents/{id}/extract             → run extraction
  *   GET  /source-documents/{id}                     → read-only show
+ *   GET  /source-documents/{id}/file                → serve uploaded file
+ *                                                     (inline by default,
+ *                                                     ?download=1 forces
+ *                                                     attachment)
  *   DELETE /source-documents/{id}                   → cancel a pending submission
  *
  * Edit and re-extraction routes will come in later slices alongside
@@ -32,6 +36,9 @@ Route::get('source-documents/{sourceDocument}/preview', [SourceDocumentControlle
 
 Route::post('source-documents/{sourceDocument}/extract', [SourceDocumentController::class, 'extract'])
     ->name('source-documents.extract');
+
+Route::get('source-documents/{sourceDocument}/file', [SourceDocumentController::class, 'file'])
+    ->name('source-documents.file');
 
 Route::get('source-documents/{sourceDocument}', [SourceDocumentController::class, 'show'])
     ->name('source-documents.show');

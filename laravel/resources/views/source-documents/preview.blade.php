@@ -40,11 +40,33 @@
     </dl>
 
     <div class="mb-8">
-        <h2 class="section-heading mb-4">Body</h2>
-        <div
-            class="rounded-lg border p-5 text-sm leading-relaxed whitespace-pre-line max-h-96 overflow-y-auto"
-            style="background: var(--color-surface-input); border-color: var(--color-surface-input-border); color: var(--color-text-primary);"
-        >{{ $sourceDocument->body }}</div>
+        @if ($sourceDocument->isPdf())
+            {{-- PDF documents have no body column content — the file
+                 itself is the source. Embed it inline so the user can
+                 verify what they uploaded before paying to extract.
+                 The browser's built-in PDF renderer handles scrolling
+                 and zoom; the download link is a fallback for users
+                 whose browsers can't display PDFs inline. --}}
+            <h2 class="section-heading mb-4">PDF preview</h2>
+            <iframe
+                src="{{ route('source-documents.file', $sourceDocument) }}"
+                class="w-full rounded-lg border"
+                style="height: 600px; background: var(--color-surface-input); border-color: var(--color-surface-input-border);"
+                title="PDF preview"
+            ></iframe>
+            <p class="mt-2 text-xs" style="color: var(--color-text-muted);">
+                Can't see the PDF?
+                <a href="{{ route('source-documents.file', ['sourceDocument' => $sourceDocument, 'download' => 1]) }}" class="link-subtle">
+                    Download the original
+                </a>
+            </p>
+        @else
+            <h2 class="section-heading mb-4">Body</h2>
+            <div
+                class="rounded-lg border p-5 text-sm leading-relaxed whitespace-pre-line max-h-96 overflow-y-auto"
+                style="background: var(--color-surface-input); border-color: var(--color-surface-input-border); color: var(--color-text-primary);"
+            >{{ $sourceDocument->body }}</div>
+        @endif
     </div>
 
     <div class="flex items-center justify-end gap-3 pt-6 border-t" style="border-color: var(--color-divider);">

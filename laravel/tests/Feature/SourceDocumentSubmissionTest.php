@@ -10,6 +10,8 @@ use App\Services\Extraction\ExtractionException;
 use App\Services\Extraction\ExtractionProvider;
 use App\Services\Extraction\FakeExtractionProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
@@ -202,6 +204,163 @@ class SourceDocumentSubmissionTest extends TestCase
         $this->delete(route('source-documents.destroy', $document))
             ->assertRedirect(route('career-input.index'));
 
+        $this->assertSoftDeleted($document);
+    }
+
+    /* ===================================================================
+     * File upload submissions.
+     * =================================================================== */
+
+    #[Test]
+    public function uploading_a_text_file_reads_contents_into_body(): void
+    {
+        $this->bindFake(fn ($f) => $f);
+        Storage::fake('local');
+
+        $file = UploadedFile::fake()->createWithContent(
+            'My_career_notes.txt',
+            'These are my career notes from the file.'
+        );
+
+        $this->post(route('source-documents.store'), ['upload' => $file]);
+
+        $document = SourceDocument::firstOrFail();
+        $this->assertSame('These are my career notes from the file.', $document->body);
+        $this->assertSame('text', $document->file_type);
+        $this->assertNull($document->file_path);
+        // Title comes from the filename — extension stripped, underscores
+        // converted to spaces.
+        $this->assertSame('My career notes', $document->title);
+    }
+
+    #[Test]
+    public function uploading_a_markdown_file_reads_contents_and_sets_markdown_type(): void
+    {
+        $this->bindFake(fn ($f) => $f);
+        Storage::fake('local');
+
+        $file = UploadedFile::fake()->createWithContent(
+            'brag-doc.md',
+            "# Brag doc\n\nSome accomplishments here."
+        );
+
+        $this->post(route('source-documents.store'), ['upload' => $file]);
+
+        $document = SourceDocument::firstOrFail();
+        $this->assertSame("# Brag doc\n\nSome accomplishments here.", $document->body);
+        $this->assertSame('markdown', $document->file_type);
+        $this->assertNull($document->file_path);
+        // Hyphen → space too.
+        $this->assertSame('brag doc', $document->title);
+    }
+
+    #[Test]
+    public function uploading_a_pdf_persists_the_file_and_leaves_body_null(): void
+    {
+        $this->bindFake(fn ($f) => $f);
+        Storage::fake('local');
+
+        $file = UploadedFile::fake()->create('Lightning Labs resume.pdf', 100, 'application/pdf');
+
+        $this->post(route('source-documents.store'), ['upload' => $file]);
+
+        $document = SourceDocument::firstOrFail();
+        $this->assertNull($document->body);
+        $this->assertSame('pdf', $document->file_type);
+        $this->assertNotNull($document->file_path);
+        $this->assertStringStartsWith('source-documents/', $document->file_path);
+        $this->assertStringEndsWith('.pdf', $document->file_path);
+        $this->assertSame('Lightning Labs resume', $document->title);
+        Storage::disk('local')->assertExists($document->file_path);
+    }
+
+    #[Test]
+    public function uploading_a_file_skips_ai_title_generation(): void
+    {
+        $fake = $this->bindFake(fn ($f) => $f->summaryReturns('Should not be used'));
+        Storage::fake('local');
+
+        $file = UploadedFile::fake()->createWithContent('notes.txt', 'Some content');
+
+        $this->post(route('source-documents.store'), ['upload' => $file]);
+
+        $this->assertSame(0, $fake->summarizeTitleCallCount);
+        // No summarize_title usage event either.
+        $this->assertSame(0, AiUsageEvent::where('operation', 'summarize_title')->count());
+    }
+
+    #[Test]
+    public function rejects_files_with_disallowed_extensions(): void
+    {
+        $this->bindFake(fn ($f) => $f);
+        Storage::fake('local');
+
+        $file = UploadedFile::fake()->create('script.exe', 10);
+
+        $this->post(route('source-documents.store'), ['upload' => $file])
+            ->assertSessionHasErrors('upload');
+
+        $this->assertSame(0, SourceDocument::count());
+    }
+
+    #[Test]
+    public function rejects_files_over_the_size_limit(): void
+    {
+        $this->bindFake(fn ($f) => $f);
+        Storage::fake('local');
+
+        // 10240 KB is the limit; 11000 KB exceeds it.
+        $file = UploadedFile::fake()->create('huge.pdf', 11000, 'application/pdf');
+
+        $this->post(route('source-documents.store'), ['upload' => $file])
+            ->assertSessionHasErrors('upload');
+
+        $this->assertSame(0, SourceDocument::count());
+    }
+
+    #[Test]
+    public function rejects_submission_with_both_body_and_file(): void
+    {
+        $this->bindFake(fn ($f) => $f);
+        Storage::fake('local');
+
+        $file = UploadedFile::fake()->createWithContent('notes.txt', 'File content');
+
+        $this->post(route('source-documents.store'), [
+            'body' => 'Pasted body',
+            'upload' => $file,
+        ])->assertSessionHasErrors();
+
+        $this->assertSame(0, SourceDocument::count());
+    }
+
+    #[Test]
+    public function rejects_submission_with_neither_body_nor_file(): void
+    {
+        $this->bindFake(fn ($f) => $f);
+
+        $this->post(route('source-documents.store'), [])
+            ->assertSessionHasErrors();
+
+        $this->assertSame(0, SourceDocument::count());
+    }
+
+    #[Test]
+    public function destroying_a_pdf_document_removes_the_file_from_disk(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('source-documents/test.pdf', 'fake pdf content');
+
+        $document = SourceDocument::create([
+            'kind' => 'other',
+            'file_type' => 'pdf',
+            'file_path' => 'source-documents/test.pdf',
+            'title' => 'Test PDF',
+        ]);
+
+        $this->delete(route('source-documents.destroy', $document));
+
+        Storage::disk('local')->assertMissing('source-documents/test.pdf');
         $this->assertSoftDeleted($document);
     }
 }
