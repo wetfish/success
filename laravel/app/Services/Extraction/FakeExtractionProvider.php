@@ -26,10 +26,12 @@ class FakeExtractionProvider implements ExtractionProvider
     private int $tokensToReturn = 100;
     private int $costCentsToReturn = 1;
     private string $synthesisToReturn = 'Synthesized description';
+    private string $summaryToReturn = 'Summary title';
     private ?ExtractionException $exceptionToThrow = null;
 
     public int $extractCallCount = 0;
     public int $synthesizeCallCount = 0;
+    public int $summarizeTitleCallCount = 0;
 
     public function __construct()
     {
@@ -66,6 +68,12 @@ class FakeExtractionProvider implements ExtractionProvider
     public function synthesisReturns(string $value): self
     {
         $this->synthesisToReturn = $value;
+        return $this;
+    }
+
+    public function summaryReturns(string $value): self
+    {
+        $this->summaryToReturn = $value;
         return $this;
     }
 
@@ -109,6 +117,23 @@ class FakeExtractionProvider implements ExtractionProvider
             description: $this->synthesisToReturn,
             inputTokens: 50,
             outputTokens: 50,
+            costCents: $this->costCentsToReturn,
+            model: 'fake-model',
+        );
+    }
+
+    public function summarizeTitle(string $body): SummaryResult
+    {
+        $this->summarizeTitleCallCount++;
+
+        if ($this->exceptionToThrow) {
+            throw $this->exceptionToThrow;
+        }
+
+        return new SummaryResult(
+            title: $this->summaryToReturn,
+            inputTokens: 30,
+            outputTokens: 10,
             costCents: $this->costCentsToReturn,
             model: 'fake-model',
         );

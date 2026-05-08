@@ -7,6 +7,7 @@ use App\Models\SourceDocument;
 use App\Services\AiUsageTracker;
 use App\Services\Extraction\DraftRecord;
 use App\Services\Extraction\ExtractionResult;
+use App\Services\Extraction\SummaryResult;
 use App\Services\Extraction\SynthesisResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use PHPUnit\Framework\Attributes\Test;
@@ -80,6 +81,56 @@ class AiUsageTrackerTest extends TestCase
         $this->assertSame(200, $event->input_tokens);
         $this->assertSame(100, $event->output_tokens);
         $this->assertSame(3, $event->cost_cents);
+    }
+
+    #[Test]
+    public function it_records_summary_results(): void
+    {
+        $tracker = new AiUsageTracker();
+        $document = $this->makeDocument();
+
+        $result = new SummaryResult(
+            title: 'Stripe interview prep',
+            inputTokens: 200,
+            outputTokens: 5,
+            costCents: 1,
+            model: 'claude-sonnet-4-6',
+        );
+
+        $event = $tracker->recordSummary(
+            result: $result,
+            provider: 'claude',
+            document: $document,
+        );
+
+        $this->assertSame('summarize_title', $event->operation);
+        $this->assertSame($document->id, $event->source_document_id);
+        $this->assertSame(200, $event->input_tokens);
+        $this->assertSame(5, $event->output_tokens);
+        $this->assertSame(1, $event->cost_cents);
+        $this->assertTrue($event->success);
+    }
+
+    #[Test]
+    public function summary_can_be_recorded_without_a_document(): void
+    {
+        $tracker = new AiUsageTracker();
+
+        $result = new SummaryResult(
+            title: 'Some title',
+            inputTokens: 100,
+            outputTokens: 5,
+            costCents: 1,
+            model: 'claude-sonnet-4-6',
+        );
+
+        $event = $tracker->recordSummary(
+            result: $result,
+            provider: 'claude',
+        );
+
+        $this->assertSame('summarize_title', $event->operation);
+        $this->assertNull($event->source_document_id);
     }
 
     #[Test]

@@ -588,6 +588,90 @@ body {
         outline: 2px solid var(--color-accent);
         outline-offset: 2px;
     }
+    /* Disabled state — feature not yet available. Removes the
+     * accent-pink hover affordance so the user can tell at a glance
+     * the button isn't actionable yet. */
+    .paperclip-btn.is-disabled,
+    .paperclip-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+    .paperclip-btn.is-disabled:hover,
+    .paperclip-btn:disabled:hover {
+        border-color: var(--color-surface-input-border);
+        color: var(--color-text-secondary);
+        background: transparent;
+    }
+
+    /* Loading overlay ===================================================== */
+
+    /* Full-screen overlay shown while a synchronous AI call runs.
+     * The form-submit handler in the view sets .is-visible immediately
+     * on submit; the overlay stays visible until the browser navigates
+     * to the response page. The pink-to-magenta gradient mirrors the
+     * range slider treatment so loading states feel consistent across
+     * the app. */
+    .loading-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgb(12 16 36 / 0.7);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 200ms ease;
+    }
+    .loading-overlay.is-visible {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .loading-overlay-inner {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1.5rem;
+        padding: 2rem 3rem;
+    }
+
+    /* Spinner — a circle with a gradient stroke that rotates. The
+     * conic gradient picks up the same accent pink used on the range
+     * slider, fading from transparent so the rotation is perceptible
+     * even with steady color. */
+    .loading-spinner {
+        width: 3rem;
+        height: 3rem;
+        border-radius: 9999px;
+        background:
+            conic-gradient(
+                from 0deg,
+                transparent 0deg,
+                var(--color-accent) 90deg,
+                #ec4899 180deg,
+                #d946a3 270deg,
+                transparent 360deg
+            );
+        -webkit-mask: radial-gradient(circle at center, transparent 50%, black 52%);
+        mask: radial-gradient(circle at center, transparent 50%, black 52%);
+        animation: loading-spin 1.2s linear infinite;
+    }
+
+    @keyframes loading-spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    .loading-message {
+        font-size: 0.9375rem;
+        font-weight: 500;
+        color: var(--color-text-primary);
+        text-align: center;
+    }
 
     /* Visually hidden, but available to assistive tech. Used on
      * labels for inputs that have a visible placeholder serving as

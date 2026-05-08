@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AiUsageEvent;
 use App\Models\SourceDocument;
 use App\Services\Extraction\ExtractionResult;
+use App\Services\Extraction\SummaryResult;
 use App\Services\Extraction\SynthesisResult;
 
 /**
@@ -40,6 +41,23 @@ class AiUsageTracker
             'provider' => $provider,
             'model' => $result->model,
             'operation' => 'synthesize',
+            'input_tokens' => $result->inputTokens,
+            'output_tokens' => $result->outputTokens,
+            'cost_cents' => $result->costCents,
+            'success' => true,
+        ]);
+    }
+
+    public function recordSummary(
+        SummaryResult $result,
+        string $provider,
+        ?SourceDocument $document = null,
+    ): AiUsageEvent {
+        return AiUsageEvent::create([
+            'provider' => $provider,
+            'model' => $result->model,
+            'operation' => 'summarize_title',
+            'source_document_id' => $document?->id,
             'input_tokens' => $result->inputTokens,
             'output_tokens' => $result->outputTokens,
             'cost_cents' => $result->costCents,

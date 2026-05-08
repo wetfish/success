@@ -133,6 +133,54 @@ class ClaudeExtractionProvider implements ExtractionProvider
         );
     }
 
+    public function summarizeTitle(string $body): SummaryResult
+    {
+        $messages = [['role' => 'user', 'content' =>
+            "Generate a short title for these career notes. The title " .
+            "will help the user identify the document later in a list.\n\n" .
+            "Notes:\n{$body}\n\n" .
+            "Return ONLY the title text — no quotes, no preamble, no " .
+            "trailing punctuation. The title should be 3-7 words.",
+        ]];
+
+        try {
+            $response = $this->client()->post('/v1/messages', [
+                'model' => $this->model,
+                'max_tokens' => 50,
+                'system' => 'You write short, descriptive titles for career notes. Titles are 3-7 words, no quotes, no trailing punctuation. Capture the most distinctive subject matter. Examples: "Stripe interview prep", "Q3 performance review notes", "Onboarding mentor brag doc".',
+                'messages' => $messages,
+            ]);
+        } catch (Throwable $e) {
+            throw new ExtractionException(
+                "Claude API request failed: {$e->getMessage()}", 0, $e
+            );
+        }
+
+        if (! $response->successful()) {
+            throw new ExtractionException(
+                "Claude API returned {$response->status()}: " . $response->body()
+            );
+        }
+
+        $responseBody = $response->json();
+        $text = $this->extractTextFromResponse($responseBody);
+        $inputTokens = (int) ($responseBody['usage']['input_tokens'] ?? 0);
+        $outputTokens = (int) ($responseBody['usage']['output_tokens'] ?? 0);
+
+        // Strip surrounding quotes the model sometimes adds despite
+        // instructions, plus any trailing period.
+        $title = trim($text);
+        $title = trim($title, "\"' \t\n.");
+
+        return new SummaryResult(
+            title: $title,
+            inputTokens: $inputTokens,
+            outputTokens: $outputTokens,
+            costCents: $this->computeCost($inputTokens, $outputTokens),
+            model: $this->model,
+        );
+    }
+
     public function estimateTokens(SourceDocument $document): int
     {
         try {

@@ -96,4 +96,27 @@ class FakeExtractionProviderTest extends TestCase
         $this->assertSame('Combined description here', $result->description);
         $this->assertSame(1, $fake->synthesizeCallCount);
     }
+
+    #[Test]
+    public function it_summarizes_a_title(): void
+    {
+        $fake = new FakeExtractionProvider();
+        $fake->summaryReturns('Stripe interview prep');
+
+        $result = $fake->summarizeTitle('Long body of notes about preparing for the Stripe interview...');
+
+        $this->assertSame('Stripe interview prep', $result->title);
+        $this->assertSame(1, $fake->summarizeTitleCallCount);
+    }
+
+    #[Test]
+    public function summarize_title_throws_when_configured_to_throw(): void
+    {
+        $fake = new FakeExtractionProvider();
+        $fake->throws(new \App\Services\Extraction\ExtractionException('Simulated failure'));
+
+        $this->expectException(\App\Services\Extraction\ExtractionException::class);
+
+        $fake->summarizeTitle('Some text');
+    }
 }

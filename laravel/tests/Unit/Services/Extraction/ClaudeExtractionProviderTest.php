@@ -215,6 +215,64 @@ class ClaudeExtractionProviderTest extends TestCase
     }
 
     #[Test]
+    public function summarize_title_returns_short_title(): void
+    {
+        Http::fake([
+            'api.anthropic.com/v1/messages' => Http::response([
+                'content' => [['type' => 'text', 'text' => 'Stripe interview prep']],
+                'usage' => ['input_tokens' => 200, 'output_tokens' => 5],
+            ], 200),
+        ]);
+
+        $result = $this->makeProvider()->summarizeTitle('Long body of career notes...');
+
+        $this->assertSame('Stripe interview prep', $result->title);
+        $this->assertSame(200, $result->inputTokens);
+        $this->assertSame(5, $result->outputTokens);
+    }
+
+    #[Test]
+    public function summarize_title_strips_surrounding_quotes_from_response(): void
+    {
+        Http::fake([
+            'api.anthropic.com/v1/messages' => Http::response([
+                'content' => [['type' => 'text', 'text' => '"Stripe interview prep"']],
+                'usage' => ['input_tokens' => 200, 'output_tokens' => 5],
+            ], 200),
+        ]);
+
+        $result = $this->makeProvider()->summarizeTitle('Long body of career notes...');
+
+        $this->assertSame('Stripe interview prep', $result->title);
+    }
+
+    #[Test]
+    public function summarize_title_strips_trailing_period_from_response(): void
+    {
+        Http::fake([
+            'api.anthropic.com/v1/messages' => Http::response([
+                'content' => [['type' => 'text', 'text' => 'Stripe interview prep.']],
+                'usage' => ['input_tokens' => 200, 'output_tokens' => 5],
+            ], 200),
+        ]);
+
+        $result = $this->makeProvider()->summarizeTitle('Long body of career notes...');
+
+        $this->assertSame('Stripe interview prep', $result->title);
+    }
+
+    #[Test]
+    public function summarize_title_throws_when_api_returns_error_status(): void
+    {
+        Http::fake([
+            'api.anthropic.com/v1/messages' => Http::response(['error' => 'rate limit'], 429),
+        ]);
+
+        $this->expectException(ExtractionException::class);
+        $this->makeProvider()->summarizeTitle('Some text');
+    }
+
+    #[Test]
     public function extract_sends_correct_headers(): void
     {
         Http::fake([

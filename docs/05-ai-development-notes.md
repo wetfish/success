@@ -89,6 +89,22 @@ Concrete rule: when a new file touches an existing entity, the first action is t
 
 This applies especially when re-establishing context after a long session, after a memory compaction, or after pulling fresh code from the repo. The cost of an extra `view` call is near-zero; the cost of writing code against an imagined schema is real debugging time, partial migrations leaving the database in a broken state, and rework.
 
+Maintain a local git checkout of the project for direct file access. Run `view` against the working tree rather than reconstructing files from memory or trying to reason about them from the conversation history. The checkout is the canonical source of truth for everything that has been committed and pushed.
+
+At the start of a new slice, verify the local checkout is up to date with the remote. Confirm the current commit hash with the developer if there's any ambiguity — slices that build on top of recent commits will silently produce wrong code if the checkout is even one commit behind.
+
+Once a slice is in progress, files on the developer's machine may be ahead of git: pasted in but not yet committed. This is normal — committing every intermediate state would create noise, and slices are typically committed as a unit once verified. In this situation the local checkout is no longer authoritative for those files. Do not regenerate them from memory. Ask the developer to upload the current version, and treat the upload as the new source of truth for the rest of the slice. Do not split attention between the upload and the older git copy of the same file; the upload supersedes.
+
+## Scope Work by Directory and Intent
+
+A single development chunk should touch one architectural layer at a time, not span the whole stack. Models, then services, then controllers and routes, then views and CSS, then tests — in that order. Each layer presented separately, pasted into the local repo, verified before moving on.
+
+The anti-pattern this exists to prevent: producing 15-20 files spanning models, services, controllers, views, and tests in a single response, then running into tool-use limits partway through and having to regenerate files from memory. Regenerating from memory is exactly the situation where hallucinated column names, wrong method signatures, and silently-broken references creep in.
+
+The dependency order matters because each layer has to leave the app in a buildable state. Models and value objects come first because services reference them. Services come before controllers because controllers inject them. Controllers and routes come before views because views call routes. Tests come last because they verify the integration of everything else and produce useful failure messages only when the layers they exercise actually exist.
+
+Concrete rule: when planning a slice, list the files by directory, group them into 3-6 chunks, and present them in dependency order. If a single chunk would exceed five files, split it. If a layer change cascades into another layer (e.g., adding a model column requires updating a related controller), make the model change in chunk one and the controller change in chunk two — don't bundle them. The user verifies and pastes between chunks; this is the natural checkpoint.
+
 ## Schema Conventions
 
 All status and type fields use string columns instead of MySQL ENUMs. ENUMs are difficult to modify in production migrations and cause issues with schema diffing tools. Expected values are documented in the schema docs and enforced in application logic.

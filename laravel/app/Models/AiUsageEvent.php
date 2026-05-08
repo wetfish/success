@@ -30,6 +30,7 @@ class AiUsageEvent extends Model
         'extract_text',
         'extract_pdf',
         'synthesize',
+        'summarize_title',
         'count_tokens',
         'health_check',
     ];

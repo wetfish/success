@@ -34,6 +34,16 @@ interface ExtractionProvider
     public function synthesize(string $existing, string $new): SynthesisResult;
 
     /**
+     * Generate a short title (3-7 words) for a piece of pasted text.
+     * Used when the user submits a source document without specifying
+     * a title — produces something more useful than "Untitled document"
+     * for the previous-submissions list.
+     *
+     * @throws ExtractionException
+     */
+    public function summarizeTitle(string $body): SummaryResult;
+
+    /**
      * Estimate the input token count for a source document without
      * making the full extraction call. Cheaper than extract() and
      * useful for cost previews.

@@ -9,15 +9,35 @@ use App\Http\Controllers\SourceDocumentController;
 use Illuminate\Support\Facades\Route;
 
 /* The home page is the AI extraction input. Users land here to paste
- * their career notes or upload a file; the page also lists all source
- * documents previously submitted. The extraction trigger and form
- * submission handler get wired up in the next slice. */
+ * their career notes (file upload coming in a later slice). The form
+ * submits to source-documents.store which creates the document and
+ * generates a title, then redirects to the preview page where the
+ * user reviews the cost estimate and confirms or cancels. */
 Route::get('/', [CareerInputController::class, 'index'])->name('career-input.index');
 
-/* Source documents — view-only for now. Editing, deleting, and
- * triggering re-extraction come in later slices. */
+/* Source document submission flow:
+ *   POST /source-documents                          → create + generate title
+ *   GET  /source-documents/{id}/preview             → cost preview page
+ *   POST /source-documents/{id}/extract             → run extraction
+ *   GET  /source-documents/{id}                     → read-only show
+ *   DELETE /source-documents/{id}                   → cancel a pending submission
+ *
+ * Edit and re-extraction routes will come in later slices alongside
+ * the draft review queue. */
+Route::post('source-documents', [SourceDocumentController::class, 'store'])
+    ->name('source-documents.store');
+
+Route::get('source-documents/{sourceDocument}/preview', [SourceDocumentController::class, 'preview'])
+    ->name('source-documents.preview');
+
+Route::post('source-documents/{sourceDocument}/extract', [SourceDocumentController::class, 'extract'])
+    ->name('source-documents.extract');
+
 Route::get('source-documents/{sourceDocument}', [SourceDocumentController::class, 'show'])
     ->name('source-documents.show');
+
+Route::delete('source-documents/{sourceDocument}', [SourceDocumentController::class, 'destroy'])
+    ->name('source-documents.destroy');
 
 Route::resource('organizations', OrganizationController::class);
 

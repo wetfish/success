@@ -19,9 +19,11 @@ class OrganizationCrudTest extends TestCase
     use RefreshDatabase;
 
     #[Test]
-    public function the_root_url_redirects_to_the_organization_index(): void
+    public function the_root_url_loads_the_career_input_page(): void
     {
-        $this->get('/')->assertRedirect(route('organizations.index'));
+        $this->get('/')
+            ->assertOk()
+            ->assertSee('Career Input');
     }
 
     #[Test]
