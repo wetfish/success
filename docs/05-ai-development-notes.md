@@ -154,6 +154,29 @@ Concrete: after any structure-changing edit to a view, count `<div>` vs `</div>`
 
 This was learned the hard way during slice 4.2 when a sloppy `str_replace` left an extra closing div behind that pushed the entire page content out of its layout container. The user caught it visually because the page rendered, just broken. Tag-balance counting would have caught it pre-paste.
 
+## Pre-Compute Multi-Line Arguments to Blade Directives
+
+Blade directives like `@class`, `@json`, `@style`, `@checked`, and `@disabled` compile their argument expression via regex match before handing it to PHP. The regexes don't reliably handle multi-line array literals, and when they fail they produce compiled PHP with unbalanced brackets — `ParseError: Unclosed '[' on line N does not match ')'` at view-render time. The error message points at the compiled file, not the Blade source, which makes diagnosis slow.
+
+The trap is that the broken form looks fine in the editor: `@class(['cell', 'is-active' => $active, 'is-empty' => $empty])` with each entry on its own line is the readable form, but it's the one that breaks. Inline interpolation (`{{ }}`) is unaffected — it's a plain echo with no regex parsing — so `{{ route('foo', ['key' => $value]) }}` over multiple lines is safe. The issue is specifically with `@directive(...)` forms.
+
+Concrete rule: when a Blade directive needs a multi-line argument (array, complex expression, route call with bound params), compute it inside a `@php` block first and pass the directive a plain variable:
+
+```blade
+@php
+    $synthesizeUrl = route('source-documents.review.merge.synthesize', [
+        'sourceDocument' => $sourceDocument,
+        'draft' => $draft->id,
+    ]);
+@endphp
+
+<script>
+    const synthesizeUrl = @json($synthesizeUrl);
+</script>
+```
+
+Or collapse to a single line. Either works. What does *not* work is putting the multi-line literal directly inside the directive's parens. This was learned during slice 4.5 — twice in one view, once with `@class` and once with `@json`, the second one not surfacing until the first was fixed. Audit before presenting: `grep -nE '@(class|style|json|checked|disabled|selected|readonly|required)\s*\([^)]*$'` flags any directive whose opening paren isn't closed on the same line.
+
 ## Schema Conventions
 
 All status and type fields use string columns instead of MySQL ENUMs. ENUMs are difficult to modify in production migrations and cause issues with schema diffing tools. Expected values are documented in the schema docs and enforced in application logic.

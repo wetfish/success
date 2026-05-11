@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AccomplishmentController;
 use App\Http\Controllers\CareerInputController;
+use App\Http\Controllers\DraftMergeController;
 use App\Http\Controllers\DraftReviewController;
 use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\PositionController;
@@ -48,24 +49,40 @@ Route::delete('source-documents/{sourceDocument}', [SourceDocumentController::cl
     ->name('source-documents.destroy');
 
 /* Draft review queue:
- *   GET  /source-documents/{doc}/review               → redirect to the
- *                                                       first pending draft
- *                                                       (or the first draft
- *                                                       overall if none
- *                                                       pending)
- *   GET  /source-documents/{doc}/review/{draft}       → display a single
- *                                                       draft with prev/next
- *                                                       navigation. All
- *                                                       drafts are browsable
- *                                                       regardless of status.
- *   POST .../review/{draft}/reject                    → reject + cascade
- *   POST .../review/{draft}/restore                   → restore rejected
- *                                                       draft to pending
- *   POST .../review/{draft}/confirm                   → create real catalog
- *                                                       record from draft
+ *   GET  /source-documents/{doc}/review                     → redirect to the
+ *                                                             first pending draft
+ *                                                             (or the first draft
+ *                                                             overall if none
+ *                                                             pending)
+ *   GET  /source-documents/{doc}/review/{draft}             → display a single
+ *                                                             draft with prev/next
+ *                                                             navigation. All
+ *                                                             drafts are browsable
+ *                                                             regardless of status.
+ *   POST .../review/{draft}/reject                          → reject + cascade
+ *   POST .../review/{draft}/restore                         → restore rejected
+ *                                                             draft to pending
+ *   POST .../review/{draft}/confirm                         → create real catalog
+ *                                                             record from draft
+ *   GET  .../review/{draft}/merge                           → merge UI: candidate
+ *                                                             picker when multiple
+ *                                                             matches, side-by-side
+ *                                                             editor when one is
+ *                                                             resolved via the
+ *                                                             ?candidate_id= query
+ *                                                             param
+ *   POST .../review/{draft}/merge/synthesize                → JSON endpoint for
+ *                                                             on-demand text
+ *                                                             synthesis. Logs an
+ *                                                             AiUsageEvent
+ *   POST .../review/{draft}/merge                           → execute the merge,
+ *                                                             mark draft `merged`,
+ *                                                             rewrite parent-name
+ *                                                             references in pending
+ *                                                             dependent drafts
  *
  * Drafts are reviewed type-ordered: organizations → positions → projects →
- * accomplishments. Merge action is added in the next mini-slice. */
+ * accomplishments. */
 Route::get('source-documents/{sourceDocument}/review', [DraftReviewController::class, 'index'])
     ->name('source-documents.review.index');
 
@@ -80,6 +97,15 @@ Route::post('source-documents/{sourceDocument}/review/{draft}/restore', [DraftRe
 
 Route::post('source-documents/{sourceDocument}/review/{draft}/confirm', [DraftReviewController::class, 'confirm'])
     ->name('source-documents.review.confirm');
+
+Route::get('source-documents/{sourceDocument}/review/{draft}/merge', [DraftMergeController::class, 'show'])
+    ->name('source-documents.review.merge.show');
+
+Route::post('source-documents/{sourceDocument}/review/{draft}/merge/synthesize', [DraftMergeController::class, 'synthesize'])
+    ->name('source-documents.review.merge.synthesize');
+
+Route::post('source-documents/{sourceDocument}/review/{draft}/merge', [DraftMergeController::class, 'store'])
+    ->name('source-documents.review.merge.store');
 
 Route::resource('organizations', OrganizationController::class);
 

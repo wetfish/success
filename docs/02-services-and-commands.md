@@ -131,7 +131,9 @@ The whole merge runs in a single transaction:
 1. Collect dependent drafts first — same logic as cascade rejection (`ExtractedRecord::findDependents()`), since the dependency walk reads the draft's pre-merge payload.
 2. Update the target record with the chosen field values (filtered to fillable columns on the target model, same shape as `DraftConfirmer`).
 3. Mark the draft `status='merged'`, `match_record_type=class, match_record_id=$target->id`.
-4. Rewrite each dependent draft's payload: replace the parent-name reference (organization_name, position_title, parent_project_name, project_name as appropriate) with the target's canonical name.
+4. Rewrite each dependent draft's payload: replace the parent-name reference (`organization_name`, `position_title`, or `project_name` depending on what was merged) with the target's canonical name.
+
+The walk in step 1 is delegated to `ExtractedRecord::findDependents()` — the same walk used by cascade rejection. Keeping merge and reject aligned on what counts as a dependency means the two flows can't drift out of sync. The current walk does NOT include `parent_project_name` references (a sub-project draft pointing at this draft as its parent); if that ever changes for cascade rejection it should change for merge in the same commit.
 
 Step 4 is what makes the merge stick across the rest of the queue. Without it, a dependent position draft would still reference the old name ("Lightning Labs") and fail confirmation with "not in your catalog yet" even though the merge resolved it to "Lightning Labs Inc."
 

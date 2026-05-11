@@ -7,6 +7,7 @@ use App\Models\SourceDocument;
 use App\Services\Drafts\DraftConfirmationException;
 use App\Services\Drafts\DraftConfirmer;
 use App\Services\Drafts\DraftFieldSchema;
+use App\Services\Drafts\DuplicateDetector;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -76,9 +77,17 @@ class DraftReviewController extends Controller
      * action (e.g., "Restore to pending" for rejected). Nothing is
      * hidden — the review page is the canonical view of all drafts
      * the AI produced, in any state.
+     *
+     * For pending drafts, also runs duplicate detection so the action
+     * bar can surface a "Merge into..." affordance alongside Confirm
+     * and Reject. Skipped for non-pending drafts since the merge
+     * action isn't available there anyway.
      */
-    public function show(SourceDocument $sourceDocument, ExtractedRecord $draft): View|RedirectResponse
-    {
+    public function show(
+        SourceDocument $sourceDocument,
+        ExtractedRecord $draft,
+        DuplicateDetector $detector,
+    ): View|RedirectResponse {
         if ($draft->source_document_id !== $sourceDocument->id) {
             abort(404);
         }
@@ -110,6 +119,14 @@ class DraftReviewController extends Controller
             ? $draft->findDependents()->count()
             : 0;
 
+        // Duplicate-merge candidates. Same pending-only gate —
+        // already-reviewed drafts don't offer the merge action, so
+        // detection would just waste a query (and, in the org case,
+        // load every org into memory for the in-PHP substring filter).
+        $mergeCandidates = $draft->isPending()
+            ? $detector->findCandidates($draft)
+            : collect();
+
         return view('draft-reviews.show', [
             'sourceDocument' => $sourceDocument,
             'draft' => $draft,
@@ -120,6 +137,7 @@ class DraftReviewController extends Controller
             'prev' => $prev,
             'next' => $next,
             'dependentCount' => $dependentCount,
+            'mergeCandidates' => $mergeCandidates,
             'fieldSchema' => DraftFieldSchema::for($draft->record_type),
         ]);
     }

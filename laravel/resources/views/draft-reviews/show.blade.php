@@ -216,8 +216,31 @@
         @if ($draft->status === 'pending')
             <p class="text-xs mr-auto" style="color: var(--color-text-muted);">
                 <span style="color: var(--color-accent);">*</span> Required.
-                Merge for duplicates arrives in the next slice.
             </p>
+
+            @if ($mergeCandidates->isNotEmpty())
+                @php
+                    // When there's exactly one candidate, link straight
+                    // to the editor (skip the picker step). When there
+                    // are several, link to the picker.
+                    $mergeRouteParams = [
+                        'sourceDocument' => $sourceDocument,
+                        'draft' => $draft->id,
+                    ];
+                    if ($mergeCandidates->count() === 1) {
+                        $mergeRouteParams['candidate_id'] = $mergeCandidates->first()->id;
+                    }
+                    $mergeLabel = $mergeCandidates->count() === 1
+                        ? 'Merge into existing'
+                        : 'Merge into existing (' . $mergeCandidates->count() . ' matches)';
+                @endphp
+                <a
+                    href="{{ route('source-documents.review.merge.show', $mergeRouteParams) }}"
+                    class="btn-secondary"
+                >
+                    {{ $mergeLabel }}
+                </a>
+            @endif
 
             <button type="submit" form="confirm-form" class="btn-primary">Confirm</button>
 

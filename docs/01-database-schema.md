@@ -353,7 +353,7 @@ Records every AI API call: which provider, what operation, how many tokens, what
 |---|---|---|---|
 | provider | string | no | Provider identifier — currently `claude`, future providers add their own names |
 | model | string | no | Model identifier (e.g., `claude-sonnet-4-6`) |
-| operation | string | no | Accepted values: `extract_text`, `extract_pdf`, `synthesize`, `count_tokens`, `health_check` |
+| operation | string | no | Accepted values: `extract_text`, `extract_pdf`, `synthesize`, `summarize_title`, `count_tokens`, `health_check` |
 | source_document_id | bigInteger | yes | FK → source_documents. Null for operations not tied to a specific document (health checks, etc.) |
 | input_tokens | unsignedInteger | no | Default `0` |
 | output_tokens | unsignedInteger | no | Default `0` |

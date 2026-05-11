@@ -509,6 +509,48 @@ body {
         color: rgb(96 165 250);
     }
 
+    /* Merge editor cells ============================================
+     * The side-by-side merge UI renders each field as 2 or 3 cells
+     * (existing | draft | optional synthesized). Each cell shows a
+     * value plus a chooser button underneath. The cell currently
+     * selected for the field gets `.is-chosen` toggled on, which
+     * accent-borders it. Used only by draft-reviews/merge.blade.php
+     * for now; extract into a more general "option card" if a
+     * second use case shows up.
+     */
+    .merge-cell {
+        display: flex;
+        flex-direction: column;
+        gap: 0.625rem;
+        padding: 0.75rem;
+        border-radius: 0.5rem;
+        border: 2px solid var(--color-surface-input-border);
+        background: var(--color-surface-input);
+        transition: border-color 150ms ease;
+    }
+    .merge-cell.is-chosen { border-color: var(--color-accent); }
+
+    .merge-cell-label {
+        font-size: 0.625rem;
+        font-weight: 600;
+        letter-spacing: 0.075em;
+        text-transform: uppercase;
+        color: var(--color-text-muted);
+    }
+    .merge-cell-value {
+        font-size: 0.875rem;
+        line-height: 1.45;
+        color: var(--color-text-primary);
+        word-break: break-word;
+        flex: 1;
+    }
+    .merge-cell-value.is-multiline { white-space: pre-wrap; }
+    .merge-cell-value.is-empty {
+        color: var(--color-text-muted);
+        font-style: italic;
+    }
+    .merge-cell-actions { margin-top: auto; }
+
     /* Career input form — drop zone, textarea, file preview =============== */
 
     /* The whole input region — textarea or file preview, plus the
