@@ -22,9 +22,18 @@ Each milestone has an "intent" — what done looks like at the level of user val
 
 **Intent:** CRUD interfaces for organizations, positions, projects (including sub-projects), and accomplishments. The author can enter their actual employment history end-to-end through the UI without dropping into the database. Source-document storage, links, tags, and people UI deferred — they have schema support and will land alongside or after the AI extraction pipeline as the use case for them emerges.
 
-### 4. AI extraction pipeline *(current)*
+### 4. AI extraction pipeline *(current — mini-slices 4.1 through 4.4 complete, 4.5 pending)*
 
 **Intent:** Paste raw text (interview prep, brag doc, performance review). Get a draft set of structured records to review, edit, and confirm. Confirmed records get linked back to the source document for traceability.
+
+**Status by mini-slice:**
+
+- **4.1 Home page draft counts & document show page summary** — complete
+- **4.2 Single-draft review page with progress bar** — complete
+- **4.3 Reject action with cascading rejection** — complete
+- **4.3.1 All-drafts-browsable & restore** — complete. Rejected drafts stay visible in the review queue with a status badge; restore action flips back to pending. Made the implicit "queue is just pending" assumption explicit and put rejected drafts back in reach.
+- **4.4 Confirm action with editable form** — complete. Pending drafts render as a form whose fields come from `DraftFieldSchema`. Submit merges form data into the payload, saves, then attempts confirmation via `DraftConfirmer`. Failures preserve edits and surface a flash message.
+- **4.5 Duplicate detection & merge UI** — pending. When confirming a draft, check whether a similar record already exists (case-insensitive substring match for organizations, exact title match within an org for positions). If so, offer the user a side-by-side merge UI to combine fields, with `synthesize_descriptions` available to auto-combine text fields. Confirmed-via-merge drafts get `status='merged'` rather than `'confirmed'`.
 
 ### 5. Resume builder
 
@@ -167,9 +176,9 @@ Things we explicitly considered and decided to build later. Each is designed-aro
 
 Decisions still pending. Each will need to be resolved before the relevant milestone.
 
-### AI provider selection
+### AI provider selection *(resolved)*
 
-Anthropic's Claude API is the leading candidate for the extraction and generation features. Open question: do we abstract behind a provider-agnostic interface from day one (more work, more flexibility), or commit to one provider and refactor later if needed (less work, harder to switch)? Lean: abstraction layer, but only for the small surface area we actually use.
+Anthropic's Claude API is the provider. Abstracted behind `App\Services\Extraction\ExtractionProvider` so a `FakeExtractionProvider` can stand in for tests and a different provider could be swapped in at the service-container boundary if needed. Current production model: `claude-sonnet-4-6`. Pricing constants live in `App\Services\AiUsageTracker`.
 
 ### Hosting strategy for the eventual SaaS
 

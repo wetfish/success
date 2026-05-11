@@ -105,6 +105,55 @@ The dependency order matters because each layer has to leave the app in a builda
 
 Concrete rule: when planning a slice, list the files by directory, group them into 3-6 chunks, and present them in dependency order. If a single chunk would exceed five files, split it. If a layer change cascades into another layer (e.g., adding a model column requires updating a related controller), make the model change in chunk one and the controller change in chunk two — don't bundle them. The user verifies and pastes between chunks; this is the natural checkpoint.
 
+## Prefer Rough Drafts with Feedback Over Upfront Clarification
+
+When designing a feature, the temptation is to ask the developer every question that comes up: which approach, which library, which trade-off. This sounds collaborative but slows the work dramatically and produces shallower discussions than thinking out loud and producing code.
+
+The better default: draft an opinionated first version with reasoned trade-offs spelled out inline, then iterate based on the developer's reaction. A rough draft surfaces concrete decisions the developer can react to ("I see you went with X, let's try Y instead"), which is much faster than abstract discussion ("X versus Y — what do you think?") that the developer has to ground out before they can answer.
+
+This works because the developer can see the structure of the proposal, push back on specific choices, and iterate. The cost of an unused rough draft is small. The cost of an extra round-trip per design decision is large.
+
+Concrete rule: when a design choice has more than one reasonable answer, pick one, document the trade-off in the code or in the response, and proceed. Save clarifying questions for actual blockers: when there's a question the developer needs to answer for the work to make sense, or when the choice has expensive long-term consequences and visible options.
+
+The companion rule: when course-correcting after the developer pushes back, change direction directly without re-litigating. The previous draft was a starting point, not a commitment.
+
+## Ask Only When Truly Blocked
+
+Related but distinct from the previous rule. The signals for actually asking:
+
+- A required input is missing and can't be inferred. ("Is the existing column called `start_date` or `started_at`?" — read the file, don't ask.)
+- A choice would create irreversible work in either direction. ("Should we add a foreign key constraint or leave it loose?" — worth asking once; reverting either is real work.)
+- The developer's intent could be interpreted multiple ways and the wrong interpretation would be expensive. ("When you say 'make it editable,' do you mean inline edit or a separate edit page?" — worth confirming because the implementations diverge significantly.)
+
+Non-signals: "I want to double-check before doing this," "what if you wanted X instead," "in case you have a preference." These multiply round trips without adding signal. The developer's time is better spent reviewing a concrete draft than answering hypotheticals.
+
+When the work is exploratory or a small scope, just do it and let the developer react. When the work is large and a wrong assumption would waste hours, ask the one specific question that resolves the largest branching point — but only that one.
+
+## Defense in Depth on AI-Produced Inputs
+
+AI extraction is non-deterministic. Even with a strict prompt, the model will occasionally omit a required field or produce slightly inconsistent structures. Code that consumes AI output must be robust to this, OR the developer ends up debugging the same "AI didn't include X" issue repeatedly.
+
+The pattern: every field the AI produces gets two coordinated mitigations.
+
+1. **Tighten the prompt.** Make the field explicitly required, with clear consequences described in the prompt rules. This reduces the omission rate substantially but doesn't eliminate it.
+2. **Make the consuming code tolerant.** Where reasonable, the service or controller handles the missing field gracefully — using a fallback lookup strategy, surfacing a clear error message, or asking the user for the missing piece.
+
+The combination is more robust than either alone. Prompt tightening catches the common case at extraction time. Tolerant services catch the residual cases AND any legacy data already in the database from before the prompt was tightened.
+
+Concrete examples from the codebase:
+- Accomplishments without `organization_name`: prompt requires it explicitly, and the confirmer falls back to global project-name lookup with disambiguation if missing.
+- Drafts with missing required fields (like `description` or `start_date`): the confirmer catches `QueryException` and `InvalidArgumentException` from the model layer and converts them to user-facing flash messages, and the editable form lets the user fill in the missing piece before re-confirming.
+
+When extending the AI extraction pipeline, apply this pattern to every new field. Trying to make either the prompt or the code perfect in isolation is a worse use of effort than making both reasonably robust.
+
+## Verify Tag Balance After Template Edits
+
+When editing Blade templates via `str_replace` operations that touch HTML structure — adding or removing wrapper divs, restructuring forms, changing conditional blocks — do a tag-count sanity check before presenting the file. The verification cost is one `grep -c` per tag type; the cost of a mismatched closer is a broken page layout the user has to debug.
+
+Concrete: after any structure-changing edit to a view, count `<div>` vs `</div>`, `@if` vs `@endif`, `@foreach` vs `@endforeach`, `@php` vs `@endphp`, `<form>` vs `</form>`. They must balance. If they don't, the edit is broken and needs another pass before it's presented.
+
+This was learned the hard way during slice 4.2 when a sloppy `str_replace` left an extra closing div behind that pushed the entire page content out of its layout container. The user caught it visually because the page rendered, just broken. Tag-balance counting would have caught it pre-paste.
+
 ## Schema Conventions
 
 All status and type fields use string columns instead of MySQL ENUMs. ENUMs are difficult to modify in production migrations and cause issues with schema diffing tools. Expected values are documented in the schema docs and enforced in application logic.

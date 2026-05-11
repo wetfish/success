@@ -17,9 +17,9 @@ For the project's mission, design philosophy, and explicit anti-goals, read [`do
 
 ## Status
 
-**Functional MVP, in active development.** The data entry milestone is complete — you can sit down and enter your full employment history end-to-end through the UI, with structured records for organizations, positions, projects (including sub-projects), and accomplishments.
+**Functional MVP, in active development.** The data entry milestone is complete, and the AI extraction pipeline is mostly built. You can paste raw notes, performance reviews, or upload a previous resume and get structured draft records back to review, edit, and confirm into the catalog. Duplicate detection and merge UI (slice 4.5) is the remaining work for that milestone.
 
-The AI extraction pipeline is the next major focus: paste raw notes, performance reviews, or a previous resume and get structured project and accomplishment records back to review. That's the moment the project shifts from "Notion replacement" to genuinely useful — manual entry is a bootstrapping step, not the long-term path.
+After milestone 4 wraps, the resume builder is next: capture a job listing, generate a tailored resume drawing from the catalog, save the result as an immutable artifact tied to the application. That's the moment the project shifts from "structured career database" to genuinely useful — manual entry and AI extraction are both bootstrapping steps; the long-term value is what you can do with the data.
 
 ## Quick Start (Docker)
 
