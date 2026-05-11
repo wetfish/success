@@ -48,6 +48,46 @@
         @endif
     </dl>
 
+    {{-- Drafts summary section. Shown only when extraction has run
+         (total > 0). Surfaces the review entry point — the actual
+         queue page is built in the next mini-slice. --}}
+    @if ($draftCounts['total'] > 0)
+        <div
+            class="rounded-lg border p-5 mb-10 flex items-center justify-between gap-4"
+            style="background: var(--color-surface-input); border-color: var(--color-surface-input-border);"
+        >
+            <div>
+                <h2 class="font-semibold text-base mb-1">
+                    {{ $draftCounts['total'] }}
+                    {{ $draftCounts['total'] === 1 ? 'draft' : 'drafts' }}
+                    extracted
+                </h2>
+                <p class="text-sm" style="color: var(--color-text-secondary);">
+                    @if ($draftCounts['pending'] > 0)
+                        {{ $draftCounts['pending'] }} pending review
+                        @if ($draftCounts['confirmed'] + $draftCounts['rejected'] + $draftCounts['merged'] > 0)
+                            · {{ $draftCounts['confirmed'] }} confirmed,
+                            {{ $draftCounts['rejected'] }} rejected,
+                            {{ $draftCounts['merged'] }} merged
+                        @endif
+                    @else
+                        All reviewed —
+                        {{ $draftCounts['confirmed'] }} confirmed,
+                        {{ $draftCounts['rejected'] }} rejected,
+                        {{ $draftCounts['merged'] }} merged
+                    @endif
+                </p>
+            </div>
+            @if ($draftCounts['pending'] > 0)
+                {{-- TODO: route('source-documents.review', $sourceDocument)
+                     gets wired up in the next mini-slice. --}}
+                <a href="#" class="btn-primary shrink-0">
+                    Review drafts
+                </a>
+            @endif
+        </div>
+    @endif
+
     <div>
         @if ($sourceDocument->isPdf())
             {{-- PDF documents are embedded inline so the user can

@@ -160,6 +160,16 @@
                                     @endif
                                 </div>
                                 <div class="flex items-center gap-3 text-xs shrink-0" style="color: var(--color-text-muted);">
+                                    @if ($document->pending_drafts_count > 0)
+                                        <span
+                                            class="px-2 py-0.5 rounded font-medium"
+                                            style="background: rgb(217 70 163 / 0.15); color: var(--color-accent);"
+                                        >
+                                            {{ $document->pending_drafts_count }}
+                                            {{ $document->pending_drafts_count === 1 ? 'draft' : 'drafts' }}
+                                            pending
+                                        </span>
+                                    @endif
                                     @if ($document->file_type)
                                         <span class="uppercase tracking-wide">{{ $document->file_type }}</span>
                                     @endif

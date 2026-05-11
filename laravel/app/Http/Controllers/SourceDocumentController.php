@@ -256,8 +256,24 @@ class SourceDocumentController extends Controller
 
     public function show(SourceDocument $sourceDocument): View
     {
+        // Count drafts by status so the show page can render the
+        // review summary section. Uses a single grouped query rather
+        // than four separate count() calls.
+        $draftCounts = $sourceDocument
+            ->extractedRecords()
+            ->selectRaw('status, COUNT(*) as count')
+            ->groupBy('status')
+            ->pluck('count', 'status');
+
         return view('source-documents.show', [
             'sourceDocument' => $sourceDocument,
+            'draftCounts' => [
+                'pending' => (int) ($draftCounts['pending'] ?? 0),
+                'confirmed' => (int) ($draftCounts['confirmed'] ?? 0),
+                'rejected' => (int) ($draftCounts['rejected'] ?? 0),
+                'merged' => (int) ($draftCounts['merged'] ?? 0),
+                'total' => (int) $draftCounts->sum(),
+            ],
         ]);
     }
 
