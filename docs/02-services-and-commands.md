@@ -31,7 +31,7 @@ Turning a `source_document` into draft records the user can review.
 
 The provider interface. Two implementations: `ClaudeExtractionProvider` (production, calls Anthropic) and `FakeExtractionProvider` (tests, returns canned responses).
 
-Methods: `extract()` for the main pipeline, `generateTitle()` for naming pasted text, `synthesizeDescriptions()` for the merge UI in slice 4.5. Each returns a typed result object.
+Methods: `extract()` for the main pipeline, `summarizeTitle()` for naming pasted text, and `synthesize()` for combining two descriptions during merge. Each returns a typed result object.
 
 ### `App\Services\Extraction\ClaudeExtractionProvider`
 
@@ -102,6 +102,42 @@ Drives two things: the review page renders form inputs based on the schema, and 
 The schema is hand-maintained rather than derived from models because payload field names occasionally differ from model column names (e.g., `organization_name` in the payload resolves to `organization_id` on Position). Schema describes the payload shape; the confirmer maps payload to model.
 
 When adding a field to a model, the schema needs to know about it before the form can collect it. Same for changing select options — update both `DraftFieldSchema` and the model's accepted-values constants.
+
+## Draft merge
+
+Turning a draft into edits on an existing record rather than creating a new one. Applies when duplicate detection finds a candidate match the user wants to merge into instead of confirming as new.
+
+### `App\Services\Drafts\DuplicateDetector`
+
+Finds existing catalog records a draft might be a duplicate of. Single public method `findCandidates(ExtractedRecord $draft): Collection`. Returns an empty collection when nothing matches; otherwise returns the matching `Organization`, `Position`, or `Project` models. The controller orders for display — no sort guarantee from the service.
+
+**Match rules per record type:**
+
+- `organization` — case-insensitive substring match against `organizations.name`, in either direction. Both "Lightning" → "Lightning Labs" and "Stripe Inc" → "Stripe" count as candidates.
+- `position` — exact case-insensitive title match within the same organization. The draft's `organization_name` must already resolve to an existing org (case-insensitive name lookup); if no parent org is in the catalog yet, the position can't have duplicates and the result is empty.
+- `project` — case-insensitive substring match against `projects.name`, scoped to projects belonging to the resolved organization. Same bidirectional logic as organizations. Cross-org matches are deliberately excluded — "Migration" at company A is not a duplicate of "Migration" at company B.
+- `accomplishment` — not scoped by this slice. Returns an empty collection. Accomplishments have too much title variance for naïve string matching to be useful; revisit if a clear pattern emerges.
+
+Detection runs on draft load (the review show page), not at confirm time. This surfaces "Merge into..." next to Confirm/Reject before the user clicks anything, instead of intercepting a confirm with a surprise redirect. The cost is one extra small query per draft view.
+
+### `App\Services\Drafts\DraftMerger`
+
+Executes a merge: updates the chosen existing record with the user's selected per-field values, marks the draft as merged, and rewrites parent-name references in pending dependent drafts so they continue to resolve at confirmation time.
+
+Single public method `merge(ExtractedRecord $draft, Model $target, array $fieldChoices): Model`. `$fieldChoices` is keyed by payload field name with values being the final resolved string per field — whatever the user picked or synthesized in the UI. The service doesn't need to know which "side" each value came from, only the resolved value.
+
+The whole merge runs in a single transaction:
+
+1. Collect dependent drafts first — same logic as cascade rejection (`ExtractedRecord::findDependents()`), since the dependency walk reads the draft's pre-merge payload.
+2. Update the target record with the chosen field values (filtered to fillable columns on the target model, same shape as `DraftConfirmer`).
+3. Mark the draft `status='merged'`, `match_record_type=class, match_record_id=$target->id`.
+4. Rewrite each dependent draft's payload: replace the parent-name reference (organization_name, position_title, parent_project_name, project_name as appropriate) with the target's canonical name.
+
+Step 4 is what makes the merge stick across the rest of the queue. Without it, a dependent position draft would still reference the old name ("Lightning Labs") and fail confirmation with "not in your catalog yet" even though the merge resolved it to "Lightning Labs Inc."
+
+### `App\Services\Drafts\DraftMergerException`
+
+A `RuntimeException` subclass thrown when a merge can't complete. Same exception-as-flash-message pattern as `DraftConfirmationException` — write the message for the user, the controller surfaces it and stays on the merge page.
 
 ## Defense-in-depth on AI inputs
 

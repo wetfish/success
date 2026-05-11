@@ -93,3 +93,19 @@ For the review queue specifically:
 The schema lives in `App\Services\Drafts\DraftFieldSchema` (see [services doc](02-services-and-commands.md#appservicesdraftsdraftfieldschema)). Field types map to standard HTML inputs: `text` → text input, `textarea` → textarea, `select` → select with options, `date` → date input, `number` → number input.
 
 Required fields show a pink asterisk. Optional fields render only if the payload has a value (so the form doesn't overwhelm the user with every possible optional field). Optional help text appears below the input where the schema provides it.
+
+## Merge editor pattern
+
+The merge UI presents the existing record's value and the draft's value side-by-side, with a third synthesized option for textarea fields. The user picks one of the available values per field via a "Use this" button placed under each value, so what they're choosing is unambiguous at a glance.
+
+**Layout.** On desktop, each field row renders as a three-column grid: existing | draft | synthesized. Each column shows the value with its "Use this" button directly underneath. On mobile (`< sm`), the columns stack so the buttons stay attached to their values rather than wrapping into a confusing row. Plain Tailwind responsive utilities (`grid-cols-1 sm:grid-cols-3`) handle the breakpoint — no JS resize logic.
+
+**Two-column fields.** Non-textarea fields (single-line text, dates, selects, numbers) render with only two columns — existing and draft. Synthesis is reserved for prose where combining two versions produces something meaningful; combining two dates or two select values doesn't.
+
+**Synthesis is fetched on click.** The synthesized column initially shows a "Synthesize" button. Clicking it posts the field name plus both source values to the synthesize endpoint, swaps in the returned text and a "Use this" button. Errors surface inline with a retry. We don't pre-synthesize all fields on page load because the user often picks "use existing" or "use draft" for most fields — pre-fetching would waste tokens.
+
+**Selection state.** Each field has a hidden input (`name="fields[{key}]"`) that holds the currently-selected value. Clicking a "Use this" button updates the hidden input and visually highlights the chosen cell. The form submit then has the resolved final values for every field; the controller doesn't need to know which side won, only the resolved value.
+
+**Candidate picker.** When duplicate detection returns more than one match, the merge route first renders a small picker — a list of existing records each with a "Merge into this one" link. The link sets `?candidate_id=` in the URL and re-enters the same view, which then renders the editor. Single-candidate merges skip the picker entirely.
+
+The pattern uses inline-IIFE script blocks consistent with the rest of the app (see Inline JavaScript above). No new framework, no separate JS file yet — extract if a second editor of this shape lands.
