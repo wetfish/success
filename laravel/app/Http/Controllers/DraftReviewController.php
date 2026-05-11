@@ -4,7 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Models\ExtractedRecord;
 use App\Models\SourceDocument;
+use App\Services\Drafts\DraftConfirmationException;
+use App\Services\Drafts\DraftConfirmer;
+use App\Services\Drafts\DraftFieldSchema;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 
@@ -116,6 +120,7 @@ class DraftReviewController extends Controller
             'prev' => $prev,
             'next' => $next,
             'dependentCount' => $dependentCount,
+            'fieldSchema' => DraftFieldSchema::for($draft->record_type),
         ]);
     }
 
@@ -202,6 +207,95 @@ class DraftReviewController extends Controller
                 'draft' => $draft->id,
             ])
             ->with('status', 'Draft restored to pending.');
+    }
+
+    /**
+     * Confirm a pending draft — merge the user's form edits into the
+     * payload, persist the updated payload, then create the real
+     * catalog record. Mark the draft as confirmed and navigate to
+     * the next draft on success.
+     *
+     * Form fields match the keys defined in DraftFieldSchema for the
+     * draft's record_type. Whatever the user submits replaces the
+     * matching keys in the payload; fields not in the schema are
+     * left alone. This lets the user fill in fields the AI omitted
+     * (the original motivation for the form) without losing any
+     * AI-extracted data that isn't on the form.
+     *
+     * Edits persist even when confirmation fails (e.g., a referenced
+     * parent doesn't exist yet) so the user doesn't lose their work
+     * if they need to confirm an earlier draft first.
+     *
+     * Parent references in the payload (organization_name,
+     * position_title, etc.) are resolved to foreign keys by exact-name
+     * lookup in the existing catalog. If a parent can't be resolved,
+     * we stay on the current draft with an explanatory flash message.
+     *
+     * Duplicate detection ("this draft probably matches an existing
+     * record, want to merge?") is slice 4.5's concern. This action
+     * always creates a new record.
+     */
+    public function confirm(
+        Request $request,
+        SourceDocument $sourceDocument,
+        ExtractedRecord $draft,
+        DraftConfirmer $confirmer,
+    ): RedirectResponse {
+        if ($draft->source_document_id !== $sourceDocument->id) {
+            abort(404);
+        }
+
+        // Merge form input into the payload. Only keys present in
+        // the schema are considered (so nothing outside the form can
+        // sneak in). Empty inputs become null and overwrite the
+        // existing payload value — clearing an input deliberately
+        // clears that field. Untouched inputs come back with their
+        // current value and merge in unchanged.
+        $schema = DraftFieldSchema::for($draft->record_type);
+        $formData = $request->only(array_keys($schema));
+        $payload = array_merge($draft->payload ?? [], $this->normalizeFormData($formData));
+
+        $draft->update(['payload' => $payload]);
+
+        try {
+            $confirmer->confirm($draft->fresh());
+        } catch (DraftConfirmationException $e) {
+            return redirect()
+                ->route('source-documents.review.show', [
+                    'sourceDocument' => $sourceDocument,
+                    'draft' => $draft->id,
+                ])
+                ->with('status', $e->getMessage());
+        }
+
+        // Navigate to the next draft in queue. If we're at the end,
+        // stay on the current one so the user sees the confirmed badge.
+        $nextDraft = $this->findNextDraft($sourceDocument, $draft) ?? $draft;
+
+        return redirect()
+            ->route('source-documents.review.show', [
+                'sourceDocument' => $sourceDocument,
+                'draft' => $nextDraft->id,
+            ])
+            ->with('status', 'Draft confirmed.');
+    }
+
+    /**
+     * Normalize form input for merging into the payload. Empty
+     * strings become null (so they don't pass schema NOT NULL checks
+     * via a stringy ''). Trims whitespace from strings. Leaves arrays
+     * alone — none of the current schema uses array fields, but if
+     * one's added later it won't be mangled.
+     */
+    private function normalizeFormData(array $formData): array
+    {
+        return array_map(function ($value) {
+            if (is_string($value)) {
+                $trimmed = trim($value);
+                return $trimmed === '' ? null : $trimmed;
+            }
+            return $value;
+        }, $formData);
     }
 
     /**

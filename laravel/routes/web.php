@@ -61,9 +61,11 @@ Route::delete('source-documents/{sourceDocument}', [SourceDocumentController::cl
  *   POST .../review/{draft}/reject                    → reject + cascade
  *   POST .../review/{draft}/restore                   → restore rejected
  *                                                       draft to pending
+ *   POST .../review/{draft}/confirm                   → create real catalog
+ *                                                       record from draft
  *
  * Drafts are reviewed type-ordered: organizations → positions → projects →
- * accomplishments. Confirm and merge actions are added in later mini-slices. */
+ * accomplishments. Merge action is added in the next mini-slice. */
 Route::get('source-documents/{sourceDocument}/review', [DraftReviewController::class, 'index'])
     ->name('source-documents.review.index');
 
@@ -75,6 +77,9 @@ Route::post('source-documents/{sourceDocument}/review/{draft}/reject', [DraftRev
 
 Route::post('source-documents/{sourceDocument}/review/{draft}/restore', [DraftReviewController::class, 'restore'])
     ->name('source-documents.review.restore');
+
+Route::post('source-documents/{sourceDocument}/review/{draft}/confirm', [DraftReviewController::class, 'confirm'])
+    ->name('source-documents.review.confirm');
 
 Route::resource('organizations', OrganizationController::class);
 

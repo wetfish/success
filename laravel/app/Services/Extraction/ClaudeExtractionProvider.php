@@ -327,10 +327,10 @@ position data: organization_name (required, references an organization in the sa
 
 project data: organization_name (required), position_title (optional, references a position at that org), parent_project_name (optional), name (required), public_name, description, problem, constraints, approach, outcome, rationale, date_precision ("day" | "month" | "quarter" | "year"), start_date (YYYY-MM-DD), end_date (YYYY-MM-DD or null), visibility ("public" | "open_source" | "internal" | "confidential"), status ("live" | "archived" | "killed" | "prototype" | "ongoing"), contribution_level ("lead" | "core" | "contributor" | "occasional" | "reviewer"), contribution_type, team_size
 
-accomplishment data: project_name (optional), position_title (optional, with organization_name), title (required), description (required), impact_metric, impact_value, impact_unit, confidence (1-5 integer), prominence (1-5 integer), date (YYYY-MM-DD) OR period_start (YYYY-MM-DD) and optional period_end (YYYY-MM-DD)
+accomplishment data: organization_name (required), project_name (optional — sets the project this accomplishment belongs to), position_title (optional — sets the position this accomplishment belongs to when no project applies), title (required), description (required), impact_metric, impact_value, impact_unit, confidence (1-5 integer), prominence (1-5 integer), date (YYYY-MM-DD) OR period_start (YYYY-MM-DD) and optional period_end (YYYY-MM-DD)
 
 Rules:
-- Each accomplishment must have either a project (via project_name) or a position (via organization_name + position_title), never both, never neither.
+- Each accomplishment must include organization_name AND either project_name (preferred) or position_title — never both project_name and position_title, never neither. The organization_name is always required; it provides the context the parent project or position belongs to.
 - Each accomplishment must have either a single date OR a period_start (with optional period_end), never both, never neither.
 - For confidence and prominence, use 3 if you cannot determine a meaningful value. Use 4-5 only when the source explicitly indicates strong evidence or high importance. Use 1-2 only when the source explicitly indicates uncertainty or low importance.
 - For date_precision on projects, choose the precision the source supports. If the source says "shipped in Q2 2023," use "quarter". If "in 2023," use "year". If a specific month, use "month". If a specific day, use "day".

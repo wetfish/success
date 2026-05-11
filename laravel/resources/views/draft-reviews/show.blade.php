@@ -19,53 +19,20 @@
     // separately as a numeric label.
     $progressPercent = $totalCount > 0 ? round(($reviewedCount / $totalCount) * 100) : 0;
 
-    // Pretty-print payload values. Strings render as-is, arrays as
-    // JSON, scalars cast to string. Empty / null values are skipped
-    // by the iteration in the view itself.
-    $formatValue = function ($value) {
-        if (is_array($value)) {
-            return json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        }
-        if (is_bool($value)) {
-            return $value ? 'true' : 'false';
-        }
-        return (string) $value;
-    };
+    // For pending drafts the body is a form; for non-pending drafts
+    // (rejected, confirmed, merged) it's read-only display. Both modes
+    // use the field schema to decide which fields to show — required
+    // fields always render, optional fields render only if the payload
+    // has a value.
+    $isEditable = $draft->status === 'pending';
+    $payload = $draft->payload ?? [];
 
-    // Humanize field keys: snake_case → "Snake case", with a few
-    // domain-specific overrides for clarity.
-    $labelOverrides = [
-        'organization_name' => 'Organization',
-        'position_title' => 'Position',
-        'project_name' => 'Project',
-        'parent_project_name' => 'Parent project',
-        'employment_type' => 'Employment type',
-        'location_arrangement' => 'Location arrangement',
-        'location_text' => 'Location',
-        'start_date' => 'Start date',
-        'end_date' => 'End date',
-        'team_name' => 'Team',
-        'team_size_immediate' => 'Immediate team size',
-        'team_size_extended' => 'Extended team size',
-        'reason_for_leaving' => 'Reason for leaving',
-        'date_precision' => 'Date precision',
-        'contribution_level' => 'Contribution level',
-        'contribution_type' => 'Contribution type',
-        'team_size' => 'Team size',
-        'public_name' => 'Public name',
-        'impact_metric' => 'Impact metric',
-        'impact_value' => 'Impact value',
-        'impact_unit' => 'Impact unit',
-        'period_start' => 'Period start',
-        'period_end' => 'Period end',
-        'founded_year' => 'Founded',
-        'size_estimate' => 'Size estimate',
-    ];
-    $formatLabel = function ($key) use ($labelOverrides) {
-        if (isset($labelOverrides[$key])) {
-            return $labelOverrides[$key];
+    $shouldRenderField = function ($key, $config) use ($payload) {
+        if ($config['required'] ?? false) {
+            return true;
         }
-        return ucfirst(str_replace('_', ' ', $key));
+        $value = $payload[$key] ?? null;
+        return $value !== null && $value !== '';
     };
 @endphp
 
@@ -126,31 +93,133 @@
             </div>
         </div>
 
-        <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
-            @foreach ($draft->payload as $key => $value)
-                @php
-                    $formatted = $formatValue($value);
-                @endphp
-                @if ($formatted !== '' && $formatted !== 'null')
-                    <div class="@if (strlen($formatted) > 80) sm:col-span-2 @endif">
-                        <dt class="metadata-label">{{ $formatLabel($key) }}</dt>
-                        <dd class="mt-1 text-sm whitespace-pre-line leading-relaxed">{{ $formatted }}</dd>
-                    </div>
-                @endif
-            @endforeach
-        </dl>
+        @if ($isEditable)
+            {{-- Editable form. The Confirm button submits this form,
+                 so user edits flow straight into the confirmation —
+                 there's no separate save step. Reject is a separate
+                 form below the card so HTML doesn't end up with
+                 illegal nested forms. --}}
+            <form
+                id="confirm-form"
+                action="{{ route('source-documents.review.confirm', ['sourceDocument' => $sourceDocument, 'draft' => $draft->id]) }}"
+                method="POST"
+            >
+                @csrf
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
+                    @foreach ($fieldSchema as $key => $config)
+                        @if ($shouldRenderField($key, $config))
+                            @php
+                                $value = $payload[$key] ?? '';
+                                $type = $config['type'];
+                                $required = $config['required'] ?? false;
+                                $isTextarea = $type === 'textarea';
+                                $colSpan = $isTextarea ? 'sm:col-span-2' : '';
+                            @endphp
+                            <div class="{{ $colSpan }}">
+                                <label for="field-{{ $key }}" class="metadata-label block mb-1">
+                                    {{ $config['label'] }}
+                                    @if ($required)
+                                        <span style="color: var(--color-accent);" aria-label="required">*</span>
+                                    @endif
+                                </label>
+                                @if ($type === 'textarea')
+                                    <textarea
+                                        id="field-{{ $key }}"
+                                        name="{{ $key }}"
+                                        class="input"
+                                        rows="3"
+                                        @if ($required) required @endif
+                                    >{{ $value }}</textarea>
+                                @elseif ($type === 'select')
+                                    <select
+                                        id="field-{{ $key }}"
+                                        name="{{ $key }}"
+                                        class="input"
+                                        @if ($required) required @endif
+                                    >
+                                        <option value="">—</option>
+                                        @foreach ($config['options'] as $option)
+                                            <option value="{{ $option }}" @if ($value === $option) selected @endif>
+                                                {{ str_replace('_', ' ', $option) }}
+                                            </option>
+                                        @endforeach
+                                    </select>
+                                @elseif ($type === 'date')
+                                    <input
+                                        type="date"
+                                        id="field-{{ $key }}"
+                                        name="{{ $key }}"
+                                        value="{{ $value }}"
+                                        class="input"
+                                        @if ($required) required @endif
+                                    >
+                                @elseif ($type === 'number')
+                                    <input
+                                        type="number"
+                                        id="field-{{ $key }}"
+                                        name="{{ $key }}"
+                                        value="{{ $value }}"
+                                        class="input"
+                                        @if ($required) required @endif
+                                    >
+                                @else
+                                    <input
+                                        type="text"
+                                        id="field-{{ $key }}"
+                                        name="{{ $key }}"
+                                        value="{{ $value }}"
+                                        class="input"
+                                        @if ($required) required @endif
+                                    >
+                                @endif
+                                @if (! empty($config['help']))
+                                    <p class="text-xs mt-1" style="color: var(--color-text-muted);">
+                                        {{ $config['help'] }}
+                                    </p>
+                                @endif
+                            </div>
+                        @endif
+                    @endforeach
+                </div>
+            </form>
+        @else
+            {{-- Read-only display for non-pending drafts. Mirrors the
+                 form structure but renders values as text rather than
+                 inputs. Only fields with values are shown. --}}
+            <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
+                @foreach ($fieldSchema as $key => $config)
+                    @php
+                        $value = $payload[$key] ?? null;
+                    @endphp
+                    @if ($value !== null && $value !== '')
+                        @php
+                            $displayValue = is_array($value)
+                                ? json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+                                : (string) $value;
+                            $colSpan = strlen($displayValue) > 80 ? 'sm:col-span-2' : '';
+                        @endphp
+                        <div class="{{ $colSpan }}">
+                            <dt class="metadata-label">{{ $config['label'] }}</dt>
+                            <dd class="mt-1 text-sm whitespace-pre-line leading-relaxed">{{ $displayValue }}</dd>
+                        </div>
+                    @endif
+                @endforeach
+            </dl>
+        @endif
     </div>
 
-    {{-- Action bar. Branches on the draft's status so the right
-         affordance is shown for each state. Pending drafts can be
-         rejected (cascade modal if there are dependents); rejected
-         drafts can be restored to pending. Confirmed and merged
-         actions arrive in later mini-slices. --}}
+    {{-- Action bar. Branches on the draft's status. For pending,
+         the Confirm submit button targets the form above; Reject is
+         its own form. For rejected, a Restore form. Confirmed/merged
+         show a status note only. --}}
     <div class="flex items-center justify-end gap-3 mb-8">
         @if ($draft->status === 'pending')
             <p class="text-xs mr-auto" style="color: var(--color-text-muted);">
-                Confirm and merge actions arrive in upcoming slices.
+                <span style="color: var(--color-accent);">*</span> Required.
+                Merge for duplicates arrives in the next slice.
             </p>
+
+            <button type="submit" form="confirm-form" class="btn-primary">Confirm</button>
 
             @if ($dependentCount > 0)
                 <button
@@ -184,7 +253,11 @@
             </form>
         @else
             <p class="text-xs mr-auto" style="color: var(--color-text-muted);">
-                Actions for {{ $draft->status }} drafts arrive in upcoming slices.
+                @if ($draft->status === 'confirmed')
+                    This draft has been confirmed and added to your catalog.
+                @else
+                    Actions for {{ $draft->status }} drafts arrive in upcoming slices.
+                @endif
             </p>
         @endif
     </div>
