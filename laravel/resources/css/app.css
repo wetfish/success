@@ -411,6 +411,104 @@ body {
         background: var(--color-accent-hover);
     }
 
+    /* Confirmation modal ================================================== */
+
+    /* Generic modal overlay for confirmation dialogs. Similar structural
+     * pattern to the nav-modal but with different content shape — title,
+     * message, and action buttons rather than a list of nav links.
+     * Reusable for any confirm-this-action interaction. */
+    .modal-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 200ms ease;
+    }
+    .modal-overlay.is-open {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .modal-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgb(12 16 36 / 0.55);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+    }
+
+    .modal-panel {
+        position: relative;
+        width: min(28rem, calc(100vw - 4rem));
+        padding: 1.75rem;
+        border-radius: 0.75rem;
+        background: var(--color-surface-card);
+        border: 1px solid var(--color-surface-card-border);
+        box-shadow: 0 20px 60px rgb(0 0 0 / 0.4);
+    }
+
+    .modal-title {
+        font-size: 1.125rem;
+        font-weight: 600;
+        color: var(--color-text-primary);
+        margin-bottom: 0.625rem;
+    }
+
+    .modal-message {
+        font-size: 0.875rem;
+        line-height: 1.5;
+        color: var(--color-text-secondary);
+        margin-bottom: 1.5rem;
+    }
+
+    .modal-actions {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 0.75rem;
+    }
+
+    /* Status badges ======================================================= */
+
+    /* Small pill labels indicating a draft's review status. Pending
+     * is the default and has no badge; rejected/confirmed/merged each
+     * get their own treatment. The colors map to intent: muted grey
+     * for rejected (deemphasis), green for confirmed (success, future),
+     * blue for merged (action taken, future).
+     *
+     * Confirmed and merged are stubbed here so 4.4 and 4.5 don't need
+     * to revisit this section. */
+    .status-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.25rem 0.625rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.025em;
+        text-transform: uppercase;
+        border-radius: 9999px;
+        border: 1px solid transparent;
+    }
+    .status-badge-rejected {
+        background: rgb(148 163 184 / 0.12);
+        border-color: rgb(148 163 184 / 0.3);
+        color: rgb(148 163 184);
+    }
+    .status-badge-confirmed {
+        background: rgb(34 197 94 / 0.12);
+        border-color: rgb(34 197 94 / 0.3);
+        color: rgb(74 222 128);
+    }
+    .status-badge-merged {
+        background: rgb(59 130 246 / 0.12);
+        border-color: rgb(59 130 246 / 0.3);
+        color: rgb(96 165 250);
+    }
+
     /* Career input form — drop zone, textarea, file preview =============== */
 
     /* The whole input region — textarea or file preview, plus the

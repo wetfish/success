@@ -78,13 +78,16 @@
                     @endif
                 </p>
             </div>
-            @if ($draftCounts['pending'] > 0)
-                {{-- TODO: route('source-documents.review', $sourceDocument)
-                     gets wired up in the next mini-slice. --}}
-                <a href="{{ route('source-documents.review.index', $sourceDocument) }}" class="btn-primary shrink-0">
-                    Review drafts
-                </a>
-            @endif
+            {{-- Review button is always visible once drafts exist.
+                 Pink primary style when there's pending work to do;
+                 secondary muted style when everything has been
+                 reviewed (the user can still browse). --}}
+            <a
+                href="{{ route('source-documents.review.index', $sourceDocument) }}"
+                class="{{ $draftCounts['pending'] > 0 ? 'btn-primary' : 'btn-secondary' }} shrink-0"
+            >
+                Review drafts
+            </a>
         </div>
     @endif
 

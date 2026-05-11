@@ -51,7 +51,7 @@
 
                 <footer class="border-t px-6 py-4" style="border-color: var(--color-divider);">
                     <p class="text-xs" style="color: var(--color-text-muted);">
-                        Success — career lifecycle tool
+                        <strong>Wetfish Success:</strong> The ultimate way to land your next job.
                     </p>
                 </footer>
             </div>

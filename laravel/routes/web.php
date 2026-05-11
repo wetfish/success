@@ -50,19 +50,31 @@ Route::delete('source-documents/{sourceDocument}', [SourceDocumentController::cl
 /* Draft review queue:
  *   GET  /source-documents/{doc}/review               → redirect to the
  *                                                       first pending draft
- *                                                       (or back to show
- *                                                       if no pending)
+ *                                                       (or the first draft
+ *                                                       overall if none
+ *                                                       pending)
  *   GET  /source-documents/{doc}/review/{draft}       → display a single
  *                                                       draft with prev/next
- *                                                       navigation
+ *                                                       navigation. All
+ *                                                       drafts are browsable
+ *                                                       regardless of status.
+ *   POST .../review/{draft}/reject                    → reject + cascade
+ *   POST .../review/{draft}/restore                   → restore rejected
+ *                                                       draft to pending
  *
  * Drafts are reviewed type-ordered: organizations → positions → projects →
- * accomplishments. Confirm/reject/merge actions are added in later mini-slices. */
+ * accomplishments. Confirm and merge actions are added in later mini-slices. */
 Route::get('source-documents/{sourceDocument}/review', [DraftReviewController::class, 'index'])
     ->name('source-documents.review.index');
 
 Route::get('source-documents/{sourceDocument}/review/{draft}', [DraftReviewController::class, 'show'])
     ->name('source-documents.review.show');
+
+Route::post('source-documents/{sourceDocument}/review/{draft}/reject', [DraftReviewController::class, 'reject'])
+    ->name('source-documents.review.reject');
+
+Route::post('source-documents/{sourceDocument}/review/{draft}/restore', [DraftReviewController::class, 'restore'])
+    ->name('source-documents.review.restore');
 
 Route::resource('organizations', OrganizationController::class);
 

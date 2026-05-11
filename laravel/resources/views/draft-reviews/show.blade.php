@@ -13,8 +13,11 @@
     ];
     $typeLabel = $typeLabels[$draft->record_type] ?? ucfirst($draft->record_type);
 
-    // Compute progress percentage for the visual bar.
-    $progressPercent = $total > 0 ? round(($position / $total) * 100) : 0;
+    // Compute progress percentage for the visual bar. Progress is
+    // measured by how many drafts have been reviewed (any non-pending
+    // status), not by current queue position. Position is shown
+    // separately as a numeric label.
+    $progressPercent = $totalCount > 0 ? round(($reviewedCount / $totalCount) * 100) : 0;
 
     // Pretty-print payload values. Strings render as-is, arrays as
     // JSON, scalars cast to string. Empty / null values are skipped
@@ -83,7 +86,7 @@
                 Draft {{ $position }} of {{ $total }}
             </h1>
             <p class="text-sm" style="color: var(--color-text-muted);">
-                {{ $total - $position + 1 }} pending
+                {{ $reviewedCount }} of {{ $totalCount }} reviewed
             </p>
         </div>
         <div
@@ -111,7 +114,16 @@
     >
         <div class="mb-5 pb-4 border-b" style="border-color: var(--color-divider);">
             <p class="metadata-label mb-1">Record type</p>
-            <h2 class="text-xl font-semibold">{{ $typeLabel }}</h2>
+            <div class="flex items-center gap-3 flex-wrap">
+                <h2 class="text-xl font-semibold">{{ $typeLabel }}</h2>
+                @if ($draft->status === 'rejected')
+                    <span class="status-badge status-badge-rejected">Rejected</span>
+                @elseif ($draft->status === 'confirmed')
+                    <span class="status-badge status-badge-confirmed">Confirmed</span>
+                @elseif ($draft->status === 'merged')
+                    <span class="status-badge status-badge-merged">Merged</span>
+                @endif
+            </div>
         </div>
 
         <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
@@ -129,16 +141,134 @@
         </dl>
     </div>
 
-    {{-- Placeholder for actions. Confirm, reject, and merge actions
-         come in the next mini-slices. --}}
-    <div
-        class="rounded-lg border border-dashed p-5 mb-8 text-center"
-        style="border-color: var(--color-surface-input-border);"
-    >
-        <p class="text-sm" style="color: var(--color-text-muted);">
-            Confirm / reject / merge actions arrive in the next slice.
-        </p>
+    {{-- Action bar. Branches on the draft's status so the right
+         affordance is shown for each state. Pending drafts can be
+         rejected (cascade modal if there are dependents); rejected
+         drafts can be restored to pending. Confirmed and merged
+         actions arrive in later mini-slices. --}}
+    <div class="flex items-center justify-end gap-3 mb-8">
+        @if ($draft->status === 'pending')
+            <p class="text-xs mr-auto" style="color: var(--color-text-muted);">
+                Confirm and merge actions arrive in upcoming slices.
+            </p>
+
+            @if ($dependentCount > 0)
+                <button
+                    type="button"
+                    class="btn-destructive"
+                    data-reject-trigger
+                >
+                    Reject
+                </button>
+            @else
+                <form
+                    action="{{ route('source-documents.review.reject', ['sourceDocument' => $sourceDocument, 'draft' => $draft->id]) }}"
+                    method="POST"
+                    class="inline"
+                >
+                    @csrf
+                    <button type="submit" class="btn-destructive">Reject</button>
+                </form>
+            @endif
+        @elseif ($draft->status === 'rejected')
+            <p class="text-xs mr-auto" style="color: var(--color-text-muted);">
+                This draft was rejected. Restore it to pending to review again.
+            </p>
+            <form
+                action="{{ route('source-documents.review.restore', ['sourceDocument' => $sourceDocument, 'draft' => $draft->id]) }}"
+                method="POST"
+                class="inline"
+            >
+                @csrf
+                <button type="submit" class="btn-secondary">Restore to pending</button>
+            </form>
+        @else
+            <p class="text-xs mr-auto" style="color: var(--color-text-muted);">
+                Actions for {{ $draft->status }} drafts arrive in upcoming slices.
+            </p>
+        @endif
     </div>
+
+    {{-- Cascade confirmation modal. Only rendered when the draft is
+         still pending AND has dependent drafts. The user sees how
+         many will be affected and confirms before the cascade runs.
+         Backdrop click, Escape key, and the explicit Cancel button
+         all dismiss it. --}}
+    @if ($draft->status === 'pending' && $dependentCount > 0)
+        <div
+            class="modal-overlay"
+            data-reject-modal
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reject-modal-heading"
+            inert
+        >
+            <div class="modal-backdrop" data-reject-backdrop aria-hidden="true"></div>
+            <div class="modal-panel">
+                <h2 id="reject-modal-heading" class="modal-title">
+                    Reject this {{ strtolower($typeLabel) }}?
+                </h2>
+                <p class="modal-message">
+                    This will also reject {{ $dependentCount }} dependent
+                    {{ $dependentCount === 1 ? 'draft' : 'drafts' }}
+                    that {{ $dependentCount === 1 ? 'references' : 'reference' }}
+                    this {{ strtolower($typeLabel) }}.
+                </p>
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" data-reject-cancel>
+                        Cancel
+                    </button>
+                    <form
+                        action="{{ route('source-documents.review.reject', ['sourceDocument' => $sourceDocument, 'draft' => $draft->id]) }}"
+                        method="POST"
+                        class="inline"
+                    >
+                        @csrf
+                        <button type="submit" class="btn-destructive">
+                            Reject all
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        {{-- Modal controller. Plain DOM, IIFE-scoped. Toggles open
+             state via .is-open on the overlay; coordinates with the
+             body's overflow to prevent background scrolling. --}}
+        <script>
+            (function () {
+                const root = document.querySelector('[data-reject-modal]');
+                const trigger = document.querySelector('[data-reject-trigger]');
+                const backdrop = document.querySelector('[data-reject-backdrop]');
+                const cancelBtn = document.querySelector('[data-reject-cancel]');
+
+                if (!root || !trigger) return;
+
+                function open() {
+                    root.classList.add('is-open');
+                    root.removeAttribute('inert');
+                    document.body.style.overflow = 'hidden';
+                }
+
+                function close() {
+                    root.classList.remove('is-open');
+                    root.setAttribute('inert', '');
+                    document.body.style.overflow = '';
+                    trigger.focus();
+                }
+
+                trigger.addEventListener('click', open);
+                backdrop?.addEventListener('click', close);
+                cancelBtn?.addEventListener('click', close);
+
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape' && root.classList.contains('is-open')) {
+                        close();
+                    }
+                });
+            })();
+        </script>
+    @endif
 
     {{-- Prev/Next navigation. Buttons are disabled at the ends of
          the queue rather than hidden, so the user has stable visual
