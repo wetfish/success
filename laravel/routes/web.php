@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AccomplishmentController;
 use App\Http\Controllers\CareerInputController;
+use App\Http\Controllers\DraftReviewController;
 use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\ProjectController;
@@ -45,6 +46,23 @@ Route::get('source-documents/{sourceDocument}', [SourceDocumentController::class
 
 Route::delete('source-documents/{sourceDocument}', [SourceDocumentController::class, 'destroy'])
     ->name('source-documents.destroy');
+
+/* Draft review queue:
+ *   GET  /source-documents/{doc}/review               → redirect to the
+ *                                                       first pending draft
+ *                                                       (or back to show
+ *                                                       if no pending)
+ *   GET  /source-documents/{doc}/review/{draft}       → display a single
+ *                                                       draft with prev/next
+ *                                                       navigation
+ *
+ * Drafts are reviewed type-ordered: organizations → positions → projects →
+ * accomplishments. Confirm/reject/merge actions are added in later mini-slices. */
+Route::get('source-documents/{sourceDocument}/review', [DraftReviewController::class, 'index'])
+    ->name('source-documents.review.index');
+
+Route::get('source-documents/{sourceDocument}/review/{draft}', [DraftReviewController::class, 'show'])
+    ->name('source-documents.review.show');
 
 Route::resource('organizations', OrganizationController::class);
 

@@ -81,7 +81,7 @@
             @if ($draftCounts['pending'] > 0)
                 {{-- TODO: route('source-documents.review', $sourceDocument)
                      gets wired up in the next mini-slice. --}}
-                <a href="#" class="btn-primary shrink-0">
+                <a href="{{ route('source-documents.review.index', $sourceDocument) }}" class="btn-primary shrink-0">
                     Review drafts
                 </a>
             @endif
