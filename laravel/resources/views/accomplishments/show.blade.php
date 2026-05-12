@@ -80,7 +80,7 @@
 
     {{-- Impact and context appear below the divider when present. --}}
     @if ($accomplishment->impact_metric || $accomplishment->impact_value || $accomplishment->impact_unit || $accomplishment->context_notes)
-        <dl class="grid grid-cols-1 gap-y-5">
+        <dl class="grid grid-cols-1 gap-y-5 mb-12">
             @if ($accomplishment->impact_metric || $accomplishment->impact_value || $accomplishment->impact_unit)
                 <div>
                     <dt class="metadata-label">Impact</dt>
@@ -106,4 +106,6 @@
             @endif
         </dl>
     @endif
+
+    @include('links._section', ['linkable' => $accomplishment])
 @endsection

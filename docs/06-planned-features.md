@@ -20,7 +20,7 @@ Each milestone has an "intent" — what done looks like at the level of user val
 
 ### 3. Basic data entry MVP *(complete)*
 
-**Intent:** CRUD interfaces for organizations, positions, projects (including sub-projects), and accomplishments. The author can enter their actual employment history end-to-end through the UI without dropping into the database. Source-document storage, links, tags, and people UI deferred — they have schema support and will land alongside or after the AI extraction pipeline as the use case for them emerges.
+**Intent:** CRUD interfaces for organizations, positions, projects (including sub-projects), and accomplishments. The author can enter their actual employment history end-to-end through the UI without dropping into the database. Source-document UI was deferred initially and landed with milestone 4. Links UI followed in a post-milestone-4 sweep, attaching to organizations, projects, positions, and accomplishments (and to people once that slice lands). Tags and people UI remain deferred — they have schema support and will land in dedicated slices before milestone 5. The AI extraction pipeline will be extended to populate link, tag, and people drafts as those UIs settle.
 
 ### 4. AI extraction pipeline *(current — mini-slices 4.1 through 4.4 complete, 4.5 pending)*
 

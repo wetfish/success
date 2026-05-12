@@ -32,7 +32,7 @@ class OrganizationRules
         return [
             'name' => ['required', 'string', 'max:255'],
             'type' => ['required', 'string', Rule::in(self::TYPES)],
-            'website' => ['nullable', 'url', 'max:500'],
+            'website' => ['nullable', 'url', 'max:255'],
             'tagline' => ['nullable', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:5000'],
             'headquarters' => ['nullable', 'string', 'max:255'],

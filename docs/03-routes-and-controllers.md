@@ -10,6 +10,7 @@ All routes live in `routes/web.php`. No API routes yet — the app is server-ren
 | Position | resource minus `index` and `create` | `organizations/{org}/positions/create` |
 | Project | resource minus `index` and `create` | three: under organization, under position, under parent project |
 | Accomplishment | resource minus `index` and `create` | two: under project, under position |
+| Link | partial resource (`store`, `edit`, `update`, `destroy`) | four: under organization, project, position, accomplishment |
 
 Each entity has its own controller in `app/Http/Controllers/` and a corresponding `{Entity}CrudTest` in `tests/Feature/`.
 
@@ -84,6 +85,22 @@ The draft review queue does **not** use form requests because the draft is stage
 Entities created under a parent use a nested URL that pre-fills the parent's foreign keys, avoiding a parent-select dropdown in the form. The form's `$entity` variable comes pre-populated from the controller; the parent IDs render as hidden inputs.
 
 Route names follow `{entity}.create{Context}` — e.g., `projects.createForPosition`, `projects.createSubProject`.
+
+## Links: polymorphic ownership
+
+Links attach to multiple parent entity types (organizations, projects, positions, accomplishments — and eventually people, when the Person UI slice lands). Rather than a separate controller per parent or a fully nested resource per parent, `LinkController` exposes:
+
+- One `createFor*` route per parent type, mirroring the create-in-context pattern.
+- A single polymorphic `POST /links` store endpoint. The form sends `linkable_type` as a short alias string (`'organization'`, `'project'`, `'position'`, `'accomplishment'`) and `linkable_id` as the parent's primary key. The controller maps the alias to a model class via `LinkController::LINKABLE_MAP` and loads the parent via `findOrFail`.
+- A flat `links/{link}` resource for `edit`, `update`, and `destroy`. The link's existing parent is recovered from its polymorphic `linkable` relationship rather than from the URL, which keeps the route table flat as parent types are added.
+
+**Edit deliberately cannot reparent a link.** `UpdateLinkRequest::rules()` omits `linkable_type` and `linkable_id`, so any tampered values get stripped before the update runs. The edit form template doesn't render the hidden parent inputs at all — defense in depth on top of the form-request filtering.
+
+**Type-conditional URL/title rules.** Most link types require a URL; `internal_doc` requires a title instead and allows the URL to be null. The form layer enforces this via `required_unless:type,internal_doc` and `required_if:type,internal_doc`; the model layer's `validateInvariants()` is the safety net.
+
+**Per-linkable type filtering.** The dropdown options on each create form are scoped via `LinkRules::TYPES_BY_LINKABLE` so context-inappropriate types aren't offered (e.g., `slack` doesn't appear on an accomplishment, `repo` doesn't appear on an organization). The DB still accepts any value from `Link::TYPES` regardless of parent — this is purely a UI affordance. On the edit page, if a link's current type is somehow outside its parent's applicable list (e.g., from AI extraction or direct DB manipulation), the controller appends it to the options so the user sees the current value selected.
+
+**Links have no show page or index.** They display inline on their parent's show page via the `links._section` partial. Adding a new parent type that accepts links touches a handful of places: add a `createFor*` controller method, register the route, add entries to `LinkController::LINKABLE_MAP`, the `showUrlFor`/`aliasFor`/`viewContext` helpers, and `LinkRules::TYPES_BY_LINKABLE`, then add the partial's `match` arm and an `@include('links._section', ['linkable' => $parent])` to the new parent's show template. The People slice will exercise this path.
 
 ## Destroy redirects
 

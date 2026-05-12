@@ -175,7 +175,7 @@
         @endif
     </div>
 
-    <div>
+    <div class="mb-12">
         <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold">Other projects</h2>
             <a href="{{ route('projects.createForOrganization', $organization) }}" class="btn-primary">
@@ -215,4 +215,6 @@
             </ul>
         @endif
     </div>
+
+    @include('links._section', ['linkable' => $organization])
 @endsection

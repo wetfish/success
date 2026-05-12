@@ -176,7 +176,7 @@
         @endif
     </div>
 
-    <div>
+    <div class="mb-12">
         <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold">Direct accomplishments</h2>
             <a href="{{ route('accomplishments.createForPosition', $position) }}" class="btn-primary">
@@ -219,4 +219,6 @@
             </ul>
         @endif
     </div>
+
+    @include('links._section', ['linkable' => $position])
 @endsection

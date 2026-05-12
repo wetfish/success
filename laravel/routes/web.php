@@ -4,6 +4,7 @@ use App\Http\Controllers\AccomplishmentController;
 use App\Http\Controllers\CareerInputController;
 use App\Http\Controllers\DraftMergeController;
 use App\Http\Controllers\DraftReviewController;
+use App\Http\Controllers\LinkController;
 use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\ProjectController;
@@ -138,3 +139,28 @@ Route::get('positions/{position}/accomplishments/create', [AccomplishmentControl
     ->name('accomplishments.createForPosition');
 
 Route::resource('accomplishments', AccomplishmentController::class)->except(['index', 'create']);
+
+/* Links attach to multiple parent types (organizations, projects,
+ * positions, accomplishments — and eventually people). Each parent
+ * type gets a nested create-in-context route. Store is polymorphic:
+ * the parent is resolved from hidden linkable_type and linkable_id
+ * inputs at submission time. Edit, update, and destroy operate on
+ * the link record directly via the flat `links/{link}` URL, with the
+ * parent recovered from the link's `linkable` relationship rather
+ * than being part of the URL.
+ *
+ * Links have no index and no show — they display inline on their
+ * parent's show page via the `links._section` partial. */
+Route::get('organizations/{organization}/links/create', [LinkController::class, 'createForOrganization'])
+    ->name('links.createForOrganization');
+
+Route::get('projects/{project}/links/create', [LinkController::class, 'createForProject'])
+    ->name('links.createForProject');
+
+Route::get('positions/{position}/links/create', [LinkController::class, 'createForPosition'])
+    ->name('links.createForPosition');
+
+Route::get('accomplishments/{accomplishment}/links/create', [LinkController::class, 'createForAccomplishment'])
+    ->name('links.createForAccomplishment');
+
+Route::resource('links', LinkController::class)->only(['store', 'edit', 'update', 'destroy']);

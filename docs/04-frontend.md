@@ -82,6 +82,14 @@ The cascade rejection modal uses the same pattern at the page level — IIFE con
 
 Extract to a separate file under `resources/js/` if the same JS appears across multiple forms. None has reached that threshold yet.
 
+## Polymorphic section partials
+
+When a child entity attaches to multiple parent types (e.g., links, which attach to organizations, projects, positions, and accomplishments — and eventually people), its "render this entity's collection on a parent page" markup lives in a single shared partial at `resources/views/{child}/_section.blade.php`. Each parent's show page pulls it in with `@include('child._section', ['linkable' => $parent])`.
+
+The partial is self-contained: it resolves the "Add" route from the parent's class via a `match` expression, so callers don't need to pass it in. Adding a new parent type that accepts the child entity becomes a one-line change in the partial (one new `match` arm) plus the `@include` on the parent's show template.
+
+This pattern lives today on links. Tags and people will use the same shape when those slices land.
+
 ## Editable draft card pattern
 
 The draft review page uses a hybrid pattern that the rest of the app may eventually want to adopt: the same card renders either a form (when the data is editable) or a read-only definition list (when it's not). Both branches walk the same field schema, so labels and field ordering stay consistent across modes.
