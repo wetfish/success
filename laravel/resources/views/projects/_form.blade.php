@@ -489,6 +489,8 @@
         </div>
     </div>
 
+    @include('tags._picker', ['entity' => $project])
+
     {{-- Notes --}}
     <div>
         <label for="user_notes" class="field-label">

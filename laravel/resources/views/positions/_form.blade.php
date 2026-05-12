@@ -266,6 +266,8 @@
         </div>
     </div>
 
+    @include('tags._picker', ['entity' => $position])
+
     {{-- General notes --}}
     <div>
         <label for="user_notes" class="field-label">

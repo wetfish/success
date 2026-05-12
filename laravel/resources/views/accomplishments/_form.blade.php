@@ -281,6 +281,8 @@
             @enderror
         </div>
     </div>
+
+    @include('tags._picker', ['entity' => $accomplishment])
 </div>
 
 <script>

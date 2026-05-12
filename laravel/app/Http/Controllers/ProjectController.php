@@ -76,7 +76,8 @@ class ProjectController extends Controller
 
     public function store(StoreProjectRequest $request): RedirectResponse
     {
-        $project = Project::create($request->validated());
+        $project = Project::create($request->safe()->except('tag_ids'));
+        $project->tags()->sync($request->input('tag_ids', []));
 
         return redirect()
             ->route('projects.show', $project)
@@ -114,7 +115,8 @@ class ProjectController extends Controller
         UpdateProjectRequest $request,
         Project $project,
     ): RedirectResponse {
-        $project->update($request->validated());
+        $project->update($request->safe()->except('tag_ids'));
+        $project->tags()->sync($request->input('tag_ids', []));
 
         return redirect()
             ->route('projects.show', $project)

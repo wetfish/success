@@ -290,6 +290,8 @@ For the "paste your notes" entry path. Raw, unstructured text or uploaded files 
 
 **Relationships.** `belongsToMany` accomplishments via `accomplishment_source_documents`. `belongsToMany` projects via `project_source_documents`. `morphedByMany` tags via `taggables`. `hasMany` extracted_records. `hasMany` ai_usage_events.
 
+**Tagging is AI-only.** Source documents are taggable, but tags are populated by the AI extraction pipeline rather than through a human-facing tag picker. The taggables polymorphic join still wires source documents to the tags table at the schema level; the difference is purely in how those rows get created. A separate review screen for AI-suggested tags is coming in the AI-pipeline-extension slice. Do not include source documents as a target for the manual tag picker — those tags would compete with the AI's classifications without clear semantics for which wins.
+
 **Notes.** Source documents are the audit trail for AI-extracted records. When a project or accomplishment is created via the extraction pipeline, the relationship to its originating source document is recorded so the user can re-extract later if the schema evolves, and so the original voice and texture is preserved beyond what makes it into normalized fields.
 
 **Extraction status is derived, not stored.** A document's status (`pending`, `completed`, `failed`) is computed from related tables — see the `isPending()`, `isCompleted()`, `isFailed()` methods on the model. This avoids the column drifting out of sync with reality. The trade-off is a small query cost on each status check; revisit if heavy index pages need it cached.

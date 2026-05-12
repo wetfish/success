@@ -9,6 +9,8 @@ use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\SourceDocumentController;
+use App\Http\Controllers\TagAliasController;
+use App\Http\Controllers\TagController;
 use Illuminate\Support\Facades\Route;
 
 /* The home page is the AI extraction input. Users land here to paste
@@ -164,3 +166,32 @@ Route::get('accomplishments/{accomplishment}/links/create', [LinkController::cla
     ->name('links.createForAccomplishment');
 
 Route::resource('links', LinkController::class)->only(['store', 'edit', 'update', 'destroy']);
+
+/* Tags are flat reference data shared across the application.
+ * Unlike polymorphic entities (links), tags have a top-level CRUD
+ * resource. No show page — the edit page serves double duty as
+ * "view + manage" because aliases are managed inline there.
+ *
+ * Source-document tagging is deliberately not exposed here: tags
+ * attached to source_documents are AI-populated during extraction
+ * and surfaced through a dedicated review screen (coming in the
+ * AI-pipeline-extension slice), not managed via this CRUD. */
+
+/* The search endpoint must be declared BEFORE Route::resource —
+ * otherwise `tags/search` matches the resource's `tags/{tag}`
+ * pattern with "search" interpreted as a tag id, and route model
+ * binding fails with a 404. */
+Route::get('tags/search', [TagController::class, 'search'])
+    ->name('tags.search');
+
+Route::resource('tags', TagController::class)->except(['show']);
+
+/* Aliases nest under a tag. Only store and destroy — aliases are
+ * immutable once created (no edit form), and the management UI
+ * lives inline on the parent tag's edit page rather than getting
+ * its own index or show route. */
+Route::post('tags/{tag}/aliases', [TagAliasController::class, 'store'])
+    ->name('tag-aliases.store');
+
+Route::delete('tags/{tag}/aliases/{alias}', [TagAliasController::class, 'destroy'])
+    ->name('tag-aliases.destroy');

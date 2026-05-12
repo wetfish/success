@@ -31,7 +31,11 @@ class OrganizationController extends Controller
 
     public function store(StoreOrganizationRequest $request): RedirectResponse
     {
-        $organization = Organization::create($request->validated());
+        // tag_ids is part of the validated payload but isn't an
+        // attribute on the organization itself — separate it out
+        // before mass-assignment, then sync after the record exists.
+        $organization = Organization::create($request->safe()->except('tag_ids'));
+        $organization->tags()->sync($request->input('tag_ids', []));
 
         return redirect()
             ->route('organizations.show', $organization)
@@ -58,7 +62,8 @@ class OrganizationController extends Controller
         UpdateOrganizationRequest $request,
         Organization $organization,
     ): RedirectResponse {
-        $organization->update($request->validated());
+        $organization->update($request->safe()->except('tag_ids'));
+        $organization->tags()->sync($request->input('tag_ids', []));
 
         return redirect()
             ->route('organizations.show', $organization)

@@ -56,7 +56,7 @@ class PositionRules
             'reason_for_leaving' => ['nullable', 'string', Rule::in(self::REASONS_FOR_LEAVING)],
             'reason_for_leaving_notes' => ['nullable', 'string', 'max:5000'],
             'user_notes' => ['nullable', 'string', 'max:10000'],
-        ];
+        ] + TagRules::syncRules();
     }
 
     /**

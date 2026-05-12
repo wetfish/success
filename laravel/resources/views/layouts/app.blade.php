@@ -102,6 +102,12 @@
                         Organizations
                     </a>
                     <a
+                        href="{{ route('tags.index') }}"
+                        class="nav-modal-link {{ request()->routeIs('tags.*') ? 'is-current' : '' }}"
+                    >
+                        Tags
+                    </a>
+                    <a
                         href="https://github.com/wetfish/success"
                         target="_blank"
                         rel="noopener noreferrer"

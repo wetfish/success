@@ -59,7 +59,8 @@ class AccomplishmentController extends Controller
 
     public function store(StoreAccomplishmentRequest $request): RedirectResponse
     {
-        $accomplishment = Accomplishment::create($request->validated());
+        $accomplishment = Accomplishment::create($request->safe()->except('tag_ids'));
+        $accomplishment->tags()->sync($request->input('tag_ids', []));
 
         return redirect()
             ->route('accomplishments.show', $accomplishment)
@@ -91,7 +92,8 @@ class AccomplishmentController extends Controller
         UpdateAccomplishmentRequest $request,
         Accomplishment $accomplishment,
     ): RedirectResponse {
-        $accomplishment->update($request->validated());
+        $accomplishment->update($request->safe()->except('tag_ids'));
+        $accomplishment->tags()->sync($request->input('tag_ids', []));
 
         return redirect()
             ->route('accomplishments.show', $accomplishment)

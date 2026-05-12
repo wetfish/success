@@ -11,6 +11,8 @@ All routes live in `routes/web.php`. No API routes yet — the app is server-ren
 | Project | resource minus `index` and `create` | three: under organization, under position, under parent project |
 | Accomplishment | resource minus `index` and `create` | two: under project, under position |
 | Link | partial resource (`store`, `edit`, `update`, `destroy`) | four: under organization, project, position, accomplishment |
+| Tag | resource minus `show` | — |
+| TagAlias | `store`, `destroy` only | nested under tag: `tags/{tag}/aliases` |
 
 Each entity has its own controller in `app/Http/Controllers/` and a corresponding `{Entity}CrudTest` in `tests/Feature/`.
 
@@ -101,6 +103,20 @@ Links attach to multiple parent entity types (organizations, projects, positions
 **Per-linkable type filtering.** The dropdown options on each create form are scoped via `LinkRules::TYPES_BY_LINKABLE` so context-inappropriate types aren't offered (e.g., `slack` doesn't appear on an accomplishment, `repo` doesn't appear on an organization). The DB still accepts any value from `Link::TYPES` regardless of parent — this is purely a UI affordance. On the edit page, if a link's current type is somehow outside its parent's applicable list (e.g., from AI extraction or direct DB manipulation), the controller appends it to the options so the user sees the current value selected.
 
 **Links have no show page or index.** They display inline on their parent's show page via the `links._section` partial. Adding a new parent type that accepts links touches a handful of places: add a `createFor*` controller method, register the route, add entries to `LinkController::LINKABLE_MAP`, the `showUrlFor`/`aliasFor`/`viewContext` helpers, and `LinkRules::TYPES_BY_LINKABLE`, then add the partial's `match` arm and an `@include('links._section', ['linkable' => $parent])` to the new parent's show template. The People slice will exercise this path.
+
+## Tags and the picker
+
+Tags are flat reference data shared across taggable entities. The model is simpler than links: a single top-level `Tag` resource (no show page — the edit page handles view and management together), plus `TagAlias` nested under tags for alternate spellings. Tags have no soft deletes; the DB cascade on `taggables.tag_id` and `tag_aliases.tag_id` cleans dependent rows automatically on hard delete.
+
+**Picker is reusable, auto-mounting.** The `tags._picker` partial is included on any parent form that supports tagging (`@include('tags._picker', ['entity' => $parent])`). The JS module at `resources/js/tag-picker.js` finds every `[data-tag-picker]` on `DOMContentLoaded` and wires it up — no manual init per form. Server-rendered chips with hidden `tag_ids[]` inputs hold the initial selection; the JS adds and removes chips, syncing the hidden inputs as the user goes. If JS fails to load, the user still sees their current tags and can submit unchanged — graceful degradation.
+
+**The `tag_ids` flow on parent controllers.** Each parent's Rules class ends its `rules()` array with `+ TagRules::syncRules()`, adding `tag_ids` and `tag_ids.*` validation. The controller's `store` and `update` use `$request->safe()->except('tag_ids')` for mass-assignment of entity attributes, then call `$entity->tags()->sync($request->input('tag_ids', []))` to apply the picker's selection. Sync semantics are intentional: an empty `tag_ids` array (or a missing key) detaches every tag.
+
+**Search endpoint ranks four tiers in PHP.** `GET /tags/search?q=…` returns up to 5 results ranked by match quality: (1) name prefix, (2) alias prefix, (3) name substring, (4) alias substring — alphabetical within each tier. Ranking is done in PHP after a single SQL query because a four-tier `CASE WHEN` is gnarly and the candidate set is tiny at MVP scale. The endpoint surfaces a `matched_alias` field on alias-match results so the picker can show "(matched: postgres)" — transparency for the user about why PostgreSQL matched their "postgres" query.
+
+**Source-document tagging is AI-only.** Source documents are schema-level taggable (the polymorphic join supports it) but are deliberately excluded from the picker. AI extraction populates source-document tags as part of the pipeline; surfacing the same picker there would create competing inputs without clear semantics. The dedicated review screen for AI-suggested tags lands with the AI-pipeline-extension slice. See the schema doc for the contract.
+
+**Cross-table invariant: tag names and aliases share a namespace.** A canonical tag name can't collide with any existing alias, and vice versa. Enforced at the form layer (closure rules in `TagRules` and `TagAliasRules` that produce friendly errors) and at the model layer (`validateInvariants()` on both `Tag` and `TagAlias`).
 
 ## Destroy redirects
 

@@ -40,7 +40,7 @@ class OrganizationRules
             'size_estimate' => ['nullable', 'string', 'max:255'],
             'status' => ['nullable', 'string', Rule::in(self::STATUSES)],
             'user_notes' => ['nullable', 'string', 'max:10000'],
-        ];
+        ] + TagRules::syncRules();
     }
 
     /**

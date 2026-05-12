@@ -5,6 +5,10 @@
 @source '../**/*.blade.php';
 @source '../**/*.js';
 
+/* Component CSS files. Each file scopes its rules under
+ * `@layer components` so they slot into Tailwind's layer cascade. */
+@import './components/tag-picker.css';
+
 @theme {
     --font-sans: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
         'Segoe UI Symbol', 'Noto Color Emoji';

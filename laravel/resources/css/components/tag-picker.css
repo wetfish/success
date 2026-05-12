@@ -1,0 +1,180 @@
+/* Tag picker component styles.
+ *
+ * The picker is composed of: a chips container (selected tags), a
+ * text input, and a dropdown of autocomplete results. The chips
+ * and input sit inside a `.tag-picker` flex container; the dropdown
+ * is positioned absolutely beneath the input.
+ *
+ * Lives in its own file as the first split-out component CSS, per
+ * the convention agreed in chunk 4 planning. Future component
+ * styles should follow the same pattern: a file under
+ * resources/css/components/ imported from app.css.
+ */
+
+ @layer components {
+    .tag-picker {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    /* Chips container — flex-wraps chips onto multiple lines as
+     * the selection grows. Empty container collapses to zero height
+     * via the `:empty` selector. */
+    .tag-picker-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.375rem;
+    }
+    .tag-picker-chips:empty { display: none; }
+
+    /* Individual chip — pill-shaped with a subtle background. The
+     * remove × is part of the chip for compactness. Hidden input
+     * is inside the chip too (rendered by Blade) so removing the
+     * chip removes its form value. */
+    .tag-picker-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        padding: 0.25rem 0.5rem 0.25rem 0.625rem;
+        border-radius: 9999px;
+        background: rgb(255 255 255 / 0.06);
+        border: 1px solid var(--color-divider);
+        font-size: 0.8125rem;
+        line-height: 1.25rem;
+        color: var(--color-text-primary);
+    }
+
+    .tag-picker-chip-label {
+        white-space: nowrap;
+    }
+
+    .tag-picker-chip-remove {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.125rem;
+        height: 1.125rem;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--color-text-muted);
+        cursor: pointer;
+        border-radius: 9999px;
+    }
+    .tag-picker-chip-remove:hover {
+        color: var(--color-text-primary);
+        background: rgb(255 255 255 / 0.08);
+    }
+    .tag-picker-chip-remove:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 1px;
+    }
+
+    /* Input wrapper — relative positioning context for the dropdown.
+     * The dropdown anchors to the bottom of the input. */
+    .tag-picker-input-wrap {
+        position: relative;
+    }
+
+    .tag-picker-input {
+        /* Inherits .input from app.css; no additional styling needed
+         * unless we want to differentiate the picker input visually. */
+    }
+
+    /* Dropdown — absolutely positioned below the input. Z-index sits
+     * above sibling form fields but stays below the global nav modal
+     * (which uses a higher z-index in app.css). */
+    .tag-picker-dropdown {
+        position: absolute;
+        top: calc(100% + 0.25rem);
+        left: 0;
+        right: 0;
+        z-index: 10;
+        list-style: none;
+        padding: 0.25rem;
+        margin: 0;
+        background: var(--color-surface-input);
+        border: 1px solid var(--color-surface-input-border);
+        border-radius: 0.5rem;
+        box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+        max-height: 20rem;
+        overflow-y: auto;
+    }
+
+    /* Individual result row — two lines: category label (muted) on
+     * top, tag name (primary) below. Alias-match hint inlines after
+     * the name when present. */
+    .tag-picker-result {
+        padding: 0.5rem 0.625rem;
+        border-radius: 0.375rem;
+        cursor: pointer;
+        transition: background-color 100ms ease-out;
+    }
+
+    .tag-picker-result.is-highlighted {
+        background: var(--color-hover-overlay);
+    }
+
+    /* Already-selected rows are non-interactive. The pink checkmark
+     * provides the affordance; opacity is preserved (not dimmed) so
+     * the user can still read the row and confirm the tag they typed
+     * is the one already attached. */
+    .tag-picker-result.is-selected {
+        cursor: default;
+    }
+    .tag-picker-result.is-selected:hover {
+        background: transparent;
+    }
+
+    .tag-picker-result-category {
+        font-size: 0.6875rem;
+        font-weight: 500;
+        color: var(--color-text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        line-height: 1;
+        margin-bottom: 0.1875rem;
+    }
+
+    .tag-picker-result-name-row {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        line-height: 1.25rem;
+    }
+
+    .tag-picker-result-name {
+        font-size: 0.9375rem;
+        font-weight: 500;
+        color: var(--color-text-primary);
+    }
+
+    .tag-picker-result-alias-hint {
+        font-size: 0.75rem;
+        color: var(--color-text-secondary);
+        font-style: italic;
+    }
+
+    /* Pink checkmark for already-selected rows. Pushes to the right
+     * so it lands at the row's end regardless of name length. */
+    .tag-picker-result-check {
+        margin-left: auto;
+        color: var(--color-accent);
+        display: inline-flex;
+        align-items: center;
+    }
+
+    /* "No matches" state. Greyed out, non-interactive, no hover. */
+    .tag-picker-result--empty {
+        padding: 0.625rem;
+        color: var(--color-text-muted);
+        font-size: 0.875rem;
+        font-style: italic;
+        cursor: default;
+        text-align: center;
+    }
+    .tag-picker-result--empty:hover {
+        background: transparent;
+    }
+}

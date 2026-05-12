@@ -30,7 +30,8 @@ class PositionController extends Controller
 
     public function store(StorePositionRequest $request): RedirectResponse
     {
-        $position = Position::create($request->validated());
+        $position = Position::create($request->safe()->except('tag_ids'));
+        $position->tags()->sync($request->input('tag_ids', []));
 
         return redirect()
             ->route('positions.show', $position)
@@ -63,7 +64,8 @@ class PositionController extends Controller
         UpdatePositionRequest $request,
         Position $position,
     ): RedirectResponse {
-        $position->update($request->validated());
+        $position->update($request->safe()->except('tag_ids'));
+        $position->tags()->sync($request->input('tag_ids', []));
 
         return redirect()
             ->route('positions.show', $position)
