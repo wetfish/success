@@ -2,7 +2,8 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Requests\OrganizationRules;
+use App\Enums\OrganizationStatus;
+use App\Enums\OrganizationType;
 use App\Http\Requests\StoreOrganizationRequest;
 use App\Http\Requests\UpdateOrganizationRequest;
 use App\Models\Organization;
@@ -24,8 +25,8 @@ class OrganizationController extends Controller
     {
         return view('organizations.create', [
             'organization' => new Organization(),
-            'types' => OrganizationRules::TYPES,
-            'statuses' => OrganizationRules::STATUSES,
+            'types' => OrganizationType::cases(),
+            'statuses' => OrganizationStatus::cases(),
         ]);
     }
 
@@ -53,8 +54,8 @@ class OrganizationController extends Controller
     {
         return view('organizations.edit', [
             'organization' => $organization,
-            'types' => OrganizationRules::TYPES,
-            'statuses' => OrganizationRules::STATUSES,
+            'types' => OrganizationType::cases(),
+            'statuses' => OrganizationStatus::cases(),
         ]);
     }
 

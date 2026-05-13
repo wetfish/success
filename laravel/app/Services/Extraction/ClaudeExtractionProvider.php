@@ -2,6 +2,8 @@
 
 namespace App\Services\Extraction;
 
+use App\Enums\OrganizationStatus;
+use App\Enums\OrganizationType;
 use App\Models\SourceDocument;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Collection;
@@ -306,10 +308,17 @@ class ClaudeExtractionProvider implements ExtractionProvider
      * The system prompt. This is genuinely Claude-specific — other
      * models would need different instructions to produce reliable
      * structured output.
+     *
+     * Placeholders in the prompt body ({{organization_types}},
+     * {{organization_statuses}}) are substituted from the canonical
+     * enums at runtime. This keeps the prompt's accepted values in
+     * sync with the rest of the application — adding a case to the
+     * enum propagates to the AI's allowed values without anyone
+     * touching this file.
      */
     private function systemPrompt(): string
     {
-        return <<<'PROMPT'
+        $template = <<<'PROMPT'
 You are extracting structured career records from a document. The document is the user's notes, performance review, brag doc, resume, or similar source material about their professional history.
 
 Return a JSON array of records. Each record has a "type" and a "data" object. Possible types:
@@ -321,7 +330,7 @@ Return a JSON array of records. Each record has a "type" and a "data" object. Po
 
 For each type, the "data" object uses these fields. Omit fields you cannot determine from the document. Do not invent values.
 
-organization data: name (required), type ("employer" | "client" | "personal" | "open_source" | "volunteer" | "educational"), website, tagline, description, headquarters, founded_year, size_estimate, status
+organization data: name (required), type ({{organization_types}} — use "prospect" only for companies the user is researching or applying to, not employment history), website, tagline, description, headquarters, founded_year, size_estimate, status ({{organization_statuses}} or omit)
 
 position data: organization_name (required, references an organization in the same response or an existing one), title (required), employment_type ("full_time" | "part_time" | "contract" | "freelance" | "internship" | "advisor" | "volunteer" | "founder"), location_arrangement ("remote" | "hybrid" | "on_site"), location_text, start_date (YYYY-MM-DD), end_date (YYYY-MM-DD or null if current), team_name, team_size_immediate, team_size_extended, mandate, reason_for_leaving ("still_employed" | "laid_off" | "quit_for_opportunity" | "quit_for_personal" | "contract_ended" | "company_wound_down" | "terminated" | "other")
 
@@ -338,5 +347,10 @@ Rules:
 
 Return only the JSON array. No preamble, no commentary, no code fences.
 PROMPT;
+
+        return strtr($template, [
+            '{{organization_types}}' => OrganizationType::promptEnumString(),
+            '{{organization_statuses}}' => OrganizationStatus::promptEnumString(),
+        ]);
     }
 }

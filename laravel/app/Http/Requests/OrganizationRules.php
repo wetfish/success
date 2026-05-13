@@ -2,43 +2,33 @@
 
 namespace App\Http\Requests;
 
+use App\Enums\OrganizationStatus;
+use App\Enums\OrganizationType;
 use Illuminate\Validation\Rule;
 
 /**
  * Shared validation rules and input normalization for Organization
  * form requests. Both StoreOrganizationRequest and UpdateOrganizationRequest
  * delegate here, so create and edit forms validate identically.
+ *
+ * Type and status values come from the OrganizationType and
+ * OrganizationStatus enums respectively. See docs/07-conventions.md
+ * for the enum-as-single-source-of-truth pattern.
  */
 class OrganizationRules
 {
-    public const TYPES = [
-        'employer',
-        'client',
-        'personal',
-        'open_source',
-        'volunteer',
-        'educational',
-    ];
-
-    public const STATUSES = [
-        'active',
-        'acquired',
-        'defunct',
-        'unknown',
-    ];
-
     public static function rules(): array
     {
         return [
             'name' => ['required', 'string', 'max:255'],
-            'type' => ['required', 'string', Rule::in(self::TYPES)],
+            'type' => ['required', 'string', Rule::enum(OrganizationType::class)],
             'website' => ['nullable', 'url', 'max:255'],
             'tagline' => ['nullable', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:5000'],
             'headquarters' => ['nullable', 'string', 'max:255'],
             'founded_year' => ['nullable', 'integer', 'min:1800', 'max:' . (date('Y') + 1)],
             'size_estimate' => ['nullable', 'string', 'max:255'],
-            'status' => ['nullable', 'string', Rule::in(self::STATUSES)],
+            'status' => ['nullable', 'string', Rule::enum(OrganizationStatus::class)],
             'user_notes' => ['nullable', 'string', 'max:10000'],
         ] + TagRules::syncRules();
     }

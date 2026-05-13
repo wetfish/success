@@ -2,6 +2,9 @@
 
 namespace App\Services\Drafts;
 
+use App\Enums\OrganizationStatus;
+use App\Enums\OrganizationType;
+
 /**
  * Defines the editable field schema for each record type. The review
  * page uses this to render form inputs with appropriate types (text,
@@ -43,7 +46,14 @@ class DraftFieldSchema
                 'type' => 'select',
                 'label' => 'Type',
                 'required' => true,
-                'options' => ['employer', 'client', 'school', 'community', 'other'],
+                // Sourced from the OrganizationType enum so the draft
+                // review UI's accepted values stay in sync with the
+                // rest of the application. Previously this list was
+                // hand-maintained and had drifted from OrganizationRules
+                // (had 'school' and 'community' that weren't valid,
+                // missing 'personal', 'open_source', etc.) — pulling
+                // from the enum prevents that recurring.
+                'options' => array_column(OrganizationType::cases(), 'value'),
             ],
             'website' => ['type' => 'text', 'label' => 'Website', 'required' => false],
             'tagline' => ['type' => 'text', 'label' => 'Tagline', 'required' => false],
@@ -55,7 +65,7 @@ class DraftFieldSchema
                 'type' => 'select',
                 'label' => 'Status',
                 'required' => false,
-                'options' => ['active', 'acquired', 'shut_down', 'unknown'],
+                'options' => array_column(OrganizationStatus::cases(), 'value'),
             ],
         ];
     }

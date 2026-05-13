@@ -30,10 +30,10 @@
                 <option value="">Choose one…</option>
                 @foreach ($types as $type)
                     <option
-                        value="{{ $type }}"
-                        @selected(old('type', $organization->type) === $type)
+                        value="{{ $type->value }}"
+                        @selected(old('type', $organization->type) === $type->value)
                     >
-                        {{ ucfirst(str_replace('_', ' ', $type)) }}
+                        {{ $type->label() }}
                     </option>
                 @endforeach
             </select>
@@ -41,7 +41,7 @@
                 <p class="field-error">{{ $message }}</p>
             @enderror
             <p class="field-help">
-                Employer, client (for freelance), personal (your own projects), open source, volunteer, or educational institution.
+                Employer, client (for freelance), personal (your own projects), open source, volunteer, educational institution, or prospect (a company you're researching or applying to).
             </p>
         </div>
     </div>
@@ -157,10 +157,10 @@
                 <option value="">Don't know yet</option>
                 @foreach ($statuses as $status)
                     <option
-                        value="{{ $status }}"
-                        @selected(old('status', $organization->status) === $status)
+                        value="{{ $status->value }}"
+                        @selected(old('status', $organization->status) === $status->value)
                     >
-                        {{ ucfirst($status) }}
+                        {{ $status->label() }}
                     </option>
                 @endforeach
             </select>
