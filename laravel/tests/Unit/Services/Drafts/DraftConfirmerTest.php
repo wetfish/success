@@ -425,4 +425,551 @@ class DraftConfirmerTest extends TestCase
 
         (new DraftConfirmer())->confirm($draft);
     }
+
+    // ────────────────────────────────────────────────────────────
+    // Helpers for the new draft types
+    // ────────────────────────────────────────────────────────────
+
+    private function makePerson(string $name = 'Sarah Chen', array $overrides = []): \App\Models\Person
+    {
+        return \App\Models\Person::create(array_merge([
+            'name' => $name,
+        ], $overrides));
+    }
+
+    private function makeTag(string $name, ?string $category = null): \App\Models\Tag
+    {
+        return \App\Models\Tag::create(['name' => $name, 'category' => $category]);
+    }
+
+    private function makeAccomplishment(Project $project, array $overrides = []): Accomplishment
+    {
+        return Accomplishment::create(array_merge([
+            'project_id' => $project->id,
+            'title' => 'A win',
+            'description' => 'Did a thing',
+            'date' => '2023-01-01',
+            'confidence' => 3,
+            'prominence' => 3,
+        ], $overrides));
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Person draft confirmation
+    // ────────────────────────────────────────────────────────────
+
+    #[Test]
+    public function confirming_a_person_draft_with_just_a_name_creates_the_person(): void
+    {
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'person', ['name' => 'Sarah Chen']);
+
+        $person = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertInstanceOf(\App\Models\Person::class, $person);
+        $this->assertSame('Sarah Chen', $person->name);
+        $this->assertSame('confirmed', $draft->fresh()->status);
+    }
+
+    #[Test]
+    public function confirming_a_person_draft_with_full_fields_creates_the_person_with_them(): void
+    {
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'person', [
+            'name' => 'Sarah Chen',
+            'current_title' => 'VP Engineering',
+            'email' => 'sarah@example.com',
+            'relationship_type' => 'manager',
+        ]);
+
+        $person = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertSame('Sarah Chen', $person->name);
+        $this->assertSame('VP Engineering', $person->current_title);
+        $this->assertSame('sarah@example.com', $person->email);
+        $this->assertSame('manager', $person->relationship_type);
+    }
+
+    #[Test]
+    public function person_draft_resolves_current_organization_by_name(): void
+    {
+        $doc = $this->makeDocument();
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $draft = $this->makeDraft($doc, 'person', [
+            'name' => 'Sarah Chen',
+            'current_organization_name' => 'Acme',
+        ]);
+
+        $person = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertSame($org->id, $person->current_organization_id);
+    }
+
+    #[Test]
+    public function person_draft_with_unresolvable_organization_name_throws(): void
+    {
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'person', [
+            'name' => 'Sarah Chen',
+            'current_organization_name' => 'Nonexistent Co',
+        ]);
+
+        $this->expectException(DraftConfirmationException::class);
+        $this->expectExceptionMessage("Nonexistent Co");
+
+        (new DraftConfirmer())->confirm($draft);
+    }
+
+    #[Test]
+    public function person_draft_without_a_name_throws(): void
+    {
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'person', ['current_title' => 'CEO']);
+
+        $this->expectException(DraftConfirmationException::class);
+
+        (new DraftConfirmer())->confirm($draft);
+    }
+
+    #[Test]
+    public function person_draft_reuses_existing_record_with_matching_name(): void
+    {
+        // The common case: a collaborator slot auto-created Sarah
+        // earlier, and now we're confirming her standalone Person
+        // draft. We shouldn't create a duplicate.
+        $existing = $this->makePerson('Sarah Chen');
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'person', [
+            'name' => 'Sarah Chen',
+            'current_title' => 'New Title',
+        ]);
+
+        $person = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertSame($existing->id, $person->id);
+        $this->assertSame(1, \App\Models\Person::count());
+        // We don't overwrite — the existing person's empty
+        // current_title is left empty rather than getting the AI's data.
+        $this->assertNull($person->current_title);
+    }
+
+    #[Test]
+    public function person_name_lookup_is_case_insensitive(): void
+    {
+        $existing = $this->makePerson('Sarah Chen');
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'person', ['name' => 'SARAH CHEN']);
+
+        $person = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertSame($existing->id, $person->id);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Link draft confirmation
+    // ────────────────────────────────────────────────────────────
+
+    #[Test]
+    public function confirming_a_link_draft_to_an_organization_creates_link_with_morph_fields(): void
+    {
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'link', [
+            'linkable_type' => 'organization',
+            'linkable_name' => 'Acme',
+            'url' => 'https://acme.example.com',
+            'type' => 'website',
+        ]);
+
+        $link = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertInstanceOf(\App\Models\Link::class, $link);
+        $this->assertSame(Organization::class, $link->linkable_type);
+        $this->assertSame($org->id, $link->linkable_id);
+        $this->assertSame('https://acme.example.com', $link->url);
+    }
+
+    #[Test]
+    public function confirming_a_link_draft_to_a_project_resolves_via_org_scope(): void
+    {
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $project = $this->makeProject($org, ['name' => 'Migration Project']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'link', [
+            'linkable_type' => 'project',
+            'linkable_name' => 'Migration Project',
+            'organization_name' => 'Acme',
+            'url' => 'https://github.com/acme/migration',
+            'type' => 'repo',
+        ]);
+
+        $link = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertSame(Project::class, $link->linkable_type);
+        $this->assertSame($project->id, $link->linkable_id);
+    }
+
+    #[Test]
+    public function confirming_a_link_draft_to_a_position_resolves_via_org_scope(): void
+    {
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $position = $this->makePosition($org, ['title' => 'Senior Engineer']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'link', [
+            'linkable_type' => 'position',
+            'linkable_name' => 'Senior Engineer',
+            'organization_name' => 'Acme',
+            'url' => 'https://example.com/job-description.pdf',
+            'type' => 'documentation',
+        ]);
+
+        $link = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertSame(Position::class, $link->linkable_type);
+        $this->assertSame($position->id, $link->linkable_id);
+    }
+
+    #[Test]
+    public function confirming_a_link_draft_to_an_accomplishment_resolves_by_unique_title(): void
+    {
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $project = $this->makeProject($org);
+        $accomplishment = $this->makeAccomplishment($project, ['title' => 'Shipped the migration']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'link', [
+            'linkable_type' => 'accomplishment',
+            'linkable_name' => 'Shipped the migration',
+            'url' => 'https://blog.example.com/migration-postmortem',
+            'type' => 'documentation',
+        ]);
+
+        $link = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertSame(Accomplishment::class, $link->linkable_type);
+        $this->assertSame($accomplishment->id, $link->linkable_id);
+    }
+
+    #[Test]
+    public function link_draft_with_unknown_linkable_type_throws(): void
+    {
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'link', [
+            'linkable_type' => 'banana',
+            'linkable_name' => 'Acme',
+            'url' => 'https://example.com',
+        ]);
+
+        $this->expectException(DraftConfirmationException::class);
+        $this->expectExceptionMessage('banana');
+
+        (new DraftConfirmer())->confirm($draft);
+    }
+
+    #[Test]
+    public function link_draft_with_missing_url_throws(): void
+    {
+        Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'link', [
+            'linkable_type' => 'organization',
+            'linkable_name' => 'Acme',
+        ]);
+
+        $this->expectException(DraftConfirmationException::class);
+        $this->expectExceptionMessage('url');
+
+        (new DraftConfirmer())->confirm($draft);
+    }
+
+    #[Test]
+    public function link_draft_with_unresolvable_parent_throws(): void
+    {
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'link', [
+            'linkable_type' => 'organization',
+            'linkable_name' => 'Nonexistent',
+            'url' => 'https://example.com',
+        ]);
+
+        $this->expectException(DraftConfirmationException::class);
+        $this->expectExceptionMessage('Nonexistent');
+
+        (new DraftConfirmer())->confirm($draft);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Nested tags on entity drafts
+    // ────────────────────────────────────────────────────────────
+
+    #[Test]
+    public function confirming_an_organization_with_nested_tags_attaches_them(): void
+    {
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'organization', [
+            'name' => 'Acme',
+            'type' => 'employer',
+            'tags' => ['B Corp', 'Remote First'],
+        ]);
+
+        $org = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertCount(2, $org->tags);
+        $tagNames = $org->tags->pluck('name')->sort()->values()->all();
+        $this->assertSame(['B Corp', 'Remote First'], $tagNames);
+    }
+
+    #[Test]
+    public function nested_tag_resolution_uses_existing_tag_by_name(): void
+    {
+        // Existing tag exists; the AI emits its name. Should resolve
+        // to the existing one rather than create a duplicate.
+        $existing = $this->makeTag('Python', 'language');
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'project', [
+            'organization_name' => 'Acme',
+            'name' => 'Tooling',
+            'visibility' => 'internal',
+            'contribution_level' => 'core',
+            'tags' => ['Python'],
+        ]);
+
+        $project = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertSame(1, \App\Models\Tag::count());
+        $this->assertSame($existing->id, $project->tags->first()->id);
+    }
+
+    #[Test]
+    public function nested_tag_resolution_uses_existing_tag_by_alias(): void
+    {
+        // The AI emits "postgres"; we have a "PostgreSQL" tag with
+        // "postgres" as an alias. Should resolve to PostgreSQL.
+        $pgTag = $this->makeTag('PostgreSQL', 'tool');
+        $pgTag->aliases()->create(['alias' => 'postgres']);
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'project', [
+            'organization_name' => 'Acme',
+            'name' => 'Database work',
+            'visibility' => 'internal',
+            'contribution_level' => 'core',
+            'tags' => ['postgres'],
+        ]);
+
+        $project = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertSame(1, \App\Models\Tag::count());
+        $this->assertSame($pgTag->id, $project->tags->first()->id);
+    }
+
+    #[Test]
+    public function nested_tag_resolution_auto_creates_unknown_tags(): void
+    {
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'project', [
+            'organization_name' => 'Acme',
+            'name' => 'A project',
+            'visibility' => 'internal',
+            'contribution_level' => 'core',
+            'tags' => ['Kubernetes'],
+        ]);
+
+        $project = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertSame(1, \App\Models\Tag::count());
+        $newTag = \App\Models\Tag::first();
+        $this->assertSame('Kubernetes', $newTag->name);
+        $this->assertNull($newTag->category); // No category on auto-create
+        $this->assertSame($newTag->id, $project->tags->first()->id);
+    }
+
+    #[Test]
+    public function nested_tag_name_lookup_is_case_insensitive(): void
+    {
+        // AI emits "python", existing tag is "Python". Should resolve
+        // to existing rather than create a duplicate.
+        $existing = $this->makeTag('Python', 'language');
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'project', [
+            'organization_name' => 'Acme',
+            'name' => 'A project',
+            'visibility' => 'internal',
+            'contribution_level' => 'core',
+            'tags' => ['python'],
+        ]);
+
+        $project = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertSame(1, \App\Models\Tag::count());
+        $this->assertSame($existing->id, $project->tags->first()->id);
+    }
+
+    #[Test]
+    public function confirming_an_accomplishment_with_nested_tags_attaches_them(): void
+    {
+        // Accomplishments are taggable too — the third entity type
+        // with nested tag attachment behavior.
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $project = $this->makeProject($org);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'accomplishment', [
+            'project_name' => $project->name,
+            'organization_name' => 'Acme',
+            'title' => 'A win',
+            'description' => 'Did a thing',
+            'date' => '2023-01-01',
+            'confidence' => 3,
+            'prominence' => 3,
+            'tags' => ['Performance', 'Migration'],
+        ]);
+
+        $accomplishment = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertCount(2, $accomplishment->tags);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Nested collaborators on entity drafts
+    // ────────────────────────────────────────────────────────────
+
+    #[Test]
+    public function confirming_a_position_with_nested_collaborators_attaches_them_with_roles(): void
+    {
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'position', $this->positionPayload([
+            'collaborators' => [
+                ['name' => 'Sarah Chen', 'role' => 'Manager'],
+                ['name' => 'Alex Rivera', 'role' => 'Peer'],
+            ],
+        ]));
+
+        $position = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertCount(2, $position->collaborators);
+        $roles = $position->collaborators->pluck('pivot.role_on_position')->sort()->values()->all();
+        $this->assertSame(['Manager', 'Peer'], $roles);
+    }
+
+    #[Test]
+    public function collaborator_resolution_uses_existing_person_by_name(): void
+    {
+        $existing = $this->makePerson('Sarah Chen');
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'position', $this->positionPayload([
+            'collaborators' => [
+                ['name' => 'Sarah Chen', 'role' => 'Manager'],
+            ],
+        ]));
+
+        $position = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertSame(1, \App\Models\Person::count());
+        $this->assertSame($existing->id, $position->collaborators->first()->id);
+    }
+
+    #[Test]
+    public function collaborator_resolution_auto_creates_unknown_people(): void
+    {
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'position', $this->positionPayload([
+            'collaborators' => [
+                ['name' => 'Brand New Person', 'role' => 'Manager'],
+            ],
+        ]));
+
+        $position = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertSame(1, \App\Models\Person::count());
+        $person = \App\Models\Person::first();
+        $this->assertSame('Brand New Person', $person->name);
+        $this->assertSame($person->id, $position->collaborators->first()->id);
+    }
+
+    #[Test]
+    public function collaborator_resolution_is_case_insensitive(): void
+    {
+        $existing = $this->makePerson('Sarah Chen');
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'position', $this->positionPayload([
+            'collaborators' => [
+                ['name' => 'SARAH CHEN', 'role' => 'Manager'],
+            ],
+        ]));
+
+        $position = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertSame(1, \App\Models\Person::count());
+        $this->assertSame($existing->id, $position->collaborators->first()->id);
+    }
+
+    #[Test]
+    public function empty_collaborator_role_normalizes_to_null(): void
+    {
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'project', $this->projectPayload([
+            'collaborators' => [
+                ['name' => 'Sarah Chen', 'role' => ''],
+            ],
+        ]));
+
+        $project = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertNull($project->collaborators->first()->pivot->role_on_project);
+    }
+
+    #[Test]
+    public function duplicate_collaborator_names_in_same_payload_dedupe(): void
+    {
+        // Defensive against AI emission errors — if the AI lists the
+        // same person twice in collaborators, we shouldn't fail on
+        // the pivot unique constraint. The sync logic keys by person
+        // id, so the second entry overwrites the first.
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'position', $this->positionPayload([
+            'collaborators' => [
+                ['name' => 'Sarah Chen', 'role' => 'Manager'],
+                ['name' => 'Sarah Chen', 'role' => 'Peer'],
+            ],
+        ]));
+
+        $position = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertCount(1, $position->collaborators);
+        // Last write wins.
+        $this->assertSame('Peer', $position->collaborators->first()->pivot->role_on_position);
+    }
+
+    #[Test]
+    public function confirming_an_accomplishment_with_nested_collaborators_attaches_them(): void
+    {
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $project = $this->makeProject($org);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'accomplishment', [
+            'project_name' => $project->name,
+            'organization_name' => 'Acme',
+            'title' => 'Shipped it',
+            'description' => 'Description',
+            'date' => '2023-01-01',
+            'confidence' => 3,
+            'prominence' => 3,
+            'collaborators' => [
+                ['name' => 'Sarah Chen', 'role' => 'Reviewer'],
+            ],
+        ]);
+
+        $accomplishment = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertCount(1, $accomplishment->collaborators);
+        $this->assertSame('Reviewer', $accomplishment->collaborators->first()->pivot->role_on_accomplishment);
+    }
 }

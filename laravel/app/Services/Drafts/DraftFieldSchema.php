@@ -4,12 +4,14 @@ namespace App\Services\Drafts;
 
 use App\Enums\OrganizationStatus;
 use App\Enums\OrganizationType;
+use App\Http\Requests\PersonRules;
+use App\Models\Link;
 
 /**
  * Defines the editable field schema for each record type. The review
  * page uses this to render form inputs with appropriate types (text,
- * textarea, date, select, number) and to know which fields the user
- * must provide before confirmation can succeed.
+ * textarea, date, select, number, boolean) and to know which fields
+ * the user must provide before confirmation can succeed.
  *
  * The schema is hand-maintained rather than derived from the models
  * because the AI's payload field names occasionally differ from the
@@ -19,11 +21,20 @@ use App\Enums\OrganizationType;
  * handles the mapping to model columns.
  *
  * For each field:
- *   - type: 'text' | 'textarea' | 'date' | 'select' | 'number'
+ *   - type: 'text' | 'textarea' | 'date' | 'select' | 'number' |
+ *           'boolean' | 'tag_list' | 'collaborator_list'
  *   - required: true if the schema can't accept null/empty
  *   - options: for 'select' type, the allowed values
  *   - label: short human-readable label for the form
  *   - help: optional hint text below the input
+ *
+ * The 'tag_list' and 'collaborator_list' types describe nested
+ * attachments on entity drafts (a project draft can carry a list of
+ * tags and a list of collaborators that get materialized as pivot
+ * rows when the draft is confirmed). The view layer special-cases
+ * these — they're not scalar fields, so the generic input rendering
+ * doesn't apply. See DraftConfirmer's attachNestedTags and
+ * attachNestedCollaborators for the materialization side.
  */
 class DraftFieldSchema
 {
@@ -34,6 +45,8 @@ class DraftFieldSchema
             'position' => self::positionFields(),
             'project' => self::projectFields(),
             'accomplishment' => self::accomplishmentFields(),
+            'person' => self::personFields(),
+            'link' => self::linkFields(),
             default => [],
         };
     }
@@ -66,6 +79,12 @@ class DraftFieldSchema
                 'label' => 'Status',
                 'required' => false,
                 'options' => array_column(OrganizationStatus::cases(), 'value'),
+            ],
+            'tags' => [
+                'type' => 'tag_list',
+                'label' => 'Tags',
+                'required' => false,
+                'help' => 'Tags the AI surfaced from the source document. Resolved against existing tag names and aliases on confirm; unknown tags auto-create.',
             ],
         ];
     }
@@ -113,6 +132,18 @@ class DraftFieldSchema
                     'quit_for_personal', 'contract_ended', 'company_wound_down',
                     'terminated', 'other',
                 ],
+            ],
+            'tags' => [
+                'type' => 'tag_list',
+                'label' => 'Tags',
+                'required' => false,
+                'help' => 'Tags the AI surfaced. Resolved against existing tag names and aliases on confirm.',
+            ],
+            'collaborators' => [
+                'type' => 'collaborator_list',
+                'label' => 'Collaborators',
+                'required' => false,
+                'help' => 'People mentioned in connection with this position. Each has a free-text role (e.g., "Manager", "Peer"). Unknown people auto-create.',
             ],
         ];
     }
@@ -171,6 +202,18 @@ class DraftFieldSchema
             'end_date' => ['type' => 'date', 'label' => 'End date', 'required' => false],
             'contribution_type' => ['type' => 'text', 'label' => 'Contribution type', 'required' => false],
             'team_size' => ['type' => 'number', 'label' => 'Team size', 'required' => false],
+            'tags' => [
+                'type' => 'tag_list',
+                'label' => 'Tags',
+                'required' => false,
+                'help' => 'Tags the AI surfaced. Resolved against existing tag names and aliases on confirm.',
+            ],
+            'collaborators' => [
+                'type' => 'collaborator_list',
+                'label' => 'Collaborators',
+                'required' => false,
+                'help' => 'People mentioned in connection with this project. Each has a free-text role (e.g., "Tech Lead", "Reviewer"). Unknown people auto-create.',
+            ],
         ];
     }
 
@@ -218,6 +261,101 @@ class DraftFieldSchema
                 'required' => false,
                 'help' => 'How significant is this accomplishment in context?',
             ],
+            'tags' => [
+                'type' => 'tag_list',
+                'label' => 'Tags',
+                'required' => false,
+                'help' => 'Tags the AI surfaced. Resolved against existing tag names and aliases on confirm.',
+            ],
+            'collaborators' => [
+                'type' => 'collaborator_list',
+                'label' => 'Collaborators',
+                'required' => false,
+                'help' => 'People mentioned in connection with this accomplishment. Each has a free-text role (e.g., "Co-author", "Reviewer"). Unknown people auto-create.',
+            ],
+        ];
+    }
+
+    /**
+     * Person fields are simpler than the entity types — no nested
+     * tags or collaborators (people aren't taggable, and they don't
+     * have collaborators on themselves). The schema covers only the
+     * scalar Person fields plus the parent-by-name reference for the
+     * current organization.
+     */
+    private static function personFields(): array
+    {
+        return [
+            'name' => ['type' => 'text', 'label' => 'Name', 'required' => true],
+            'current_title' => ['type' => 'text', 'label' => 'Current title', 'required' => false],
+            'current_organization_name' => [
+                'type' => 'text',
+                'label' => 'Current organization',
+                'required' => false,
+                'help' => 'Optional — if set, must match the name of an existing organization.',
+            ],
+            'email' => ['type' => 'text', 'label' => 'Email', 'required' => false],
+            'relationship_type' => [
+                'type' => 'select',
+                'label' => 'Relationship',
+                'required' => false,
+                'options' => PersonRules::RELATIONSHIP_TYPES,
+            ],
+            'user_notes' => ['type' => 'textarea', 'label' => 'Notes', 'required' => false],
+        ];
+    }
+
+    /**
+     * Link fields cover the polymorphic parent reference, the URL,
+     * and the optional metadata. The `type` field shows the union of
+     * all link types across all parent kinds — cross-field validity
+     * (e.g., `github` is only valid on org/project parents, not on
+     * positions) is enforced at the LinkRules validation layer, not
+     * here. Keeping the schema permissive lets the review UI offer
+     * the full type list as a select without per-row JS to filter
+     * options when linkable_type changes.
+     */
+    private static function linkFields(): array
+    {
+        return [
+            'linkable_type' => [
+                'type' => 'select',
+                'label' => 'Attaches to',
+                'required' => true,
+                'options' => ['organization', 'project', 'position', 'accomplishment'],
+            ],
+            'linkable_name' => [
+                'type' => 'text',
+                'label' => 'Entity name',
+                'required' => true,
+                'help' => 'The name of the entity this link attaches to. Must match an existing record of the chosen type.',
+            ],
+            'organization_name' => [
+                'type' => 'text',
+                'label' => 'Organization',
+                'required' => false,
+                'help' => 'Required when attaches-to is position, project, or accomplishment (to disambiguate the parent).',
+            ],
+            'url' => ['type' => 'text', 'label' => 'URL', 'required' => true],
+            'type' => [
+                'type' => 'select',
+                'label' => 'Link type',
+                'required' => false,
+                // Union of all link types. Cross-field validity (e.g.,
+                // github + position is invalid) is enforced at the
+                // request validation layer when the link is created,
+                // not here.
+                'options' => Link::TYPES,
+            ],
+            'title' => ['type' => 'text', 'label' => 'Title', 'required' => false],
+            'description' => ['type' => 'textarea', 'label' => 'Description', 'required' => false],
+            'is_personal_appearance' => [
+                'type' => 'boolean',
+                'label' => 'Personal appearance',
+                'required' => false,
+                'help' => 'Signature evidence — a media appearance, conference talk, or podcast featuring you, as opposed to a supporting link like docs or a repo.',
+            ],
+            'date' => ['type' => 'date', 'label' => 'Date', 'required' => false],
         ];
     }
 }

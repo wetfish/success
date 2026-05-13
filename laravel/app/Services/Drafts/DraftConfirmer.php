@@ -4,15 +4,18 @@ namespace App\Services\Drafts;
 
 use App\Models\Accomplishment;
 use App\Models\ExtractedRecord;
+use App\Models\Link;
 use App\Models\Organization;
+use App\Models\Person;
 use App\Models\Position;
 use App\Models\Project;
+use App\Models\Tag;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 
 /**
  * Converts a pending ExtractedRecord into a real catalog record
- * (Organization, Position, Project, or Accomplishment).
+ * (Organization, Position, Project, Accomplishment, Person, or Link).
  *
  * The draft's payload is a flat array of field values produced by
  * the AI at extraction time. Parent references — organization,
@@ -22,12 +25,23 @@ use Illuminate\Support\Facades\DB;
  * by looking up exact-name (case-insensitive) matches in the
  * existing catalog.
  *
- * If a parent can't be resolved, throws DraftConfirmationException
+ * Entity drafts (organization, position, project, accomplishment)
+ * may also carry nested `tags` and `collaborators` arrays. These get
+ * materialized as pivot rows after the parent record is created.
+ * Tags resolve against existing tag names or aliases (case-insensitive)
+ * and auto-create when no match exists. Collaborators resolve against
+ * existing people by name (case-insensitive) and auto-create when no
+ * match exists. This mirrors the AI's "every mention" output shape —
+ * a person mentioned in a collaborator slot doesn't need to already
+ * exist as a top-level Person record.
+ *
+ * If a parent reference can't be resolved, throws DraftConfirmationException
  * with a user-facing message. The controller catches this and
  * surfaces it as a flash message; no rows are created.
  *
- * The whole confirmation (real record creation + draft status
- * update) runs in a transaction so a partial state is impossible.
+ * The whole confirmation (real record creation + nested attachments +
+ * draft status update) runs in a transaction so a partial state is
+ * impossible.
  *
  * Duplicate detection — "this org draft probably matches an existing
  * Lightning Labs Inc record, do you want to merge?" — is NOT in
@@ -61,6 +75,8 @@ class DraftConfirmer
                     'position' => $this->confirmPosition($draft),
                     'project' => $this->confirmProject($draft),
                     'accomplishment' => $this->confirmAccomplishment($draft),
+                    'person' => $this->confirmPerson($draft),
+                    'link' => $this->confirmLink($draft),
                     default => throw new DraftConfirmationException(
                         "Unknown record type: {$draft->record_type}"
                     ),
@@ -98,20 +114,29 @@ class DraftConfirmer
     }
 
     /**
-     * Organization confirmation is the simplest case — no parent
-     * references to resolve. Map fillable payload fields to the
-     * model and create.
+     * Organization confirmation is the simplest case for parent
+     * resolution — no parent references to resolve. Map fillable
+     * payload fields to the model, create, then attach any nested
+     * tags. Organizations are not collaborator-bearing (collaborators
+     * live on positions, projects, and accomplishments only).
      */
     private function confirmOrganization(ExtractedRecord $draft): Organization
     {
-        return Organization::create(
-            $this->filterFillable($draft->payload ?? [], Organization::class)
+        $payload = $draft->payload ?? [];
+        $organization = Organization::create(
+            $this->filterFillable($payload, Organization::class)
         );
+
+        $this->attachNestedTags($organization, $payload);
+
+        return $organization;
     }
 
     /**
      * Position requires organization_id, resolved from the
-     * organization_name field in the payload.
+     * organization_name field in the payload. May carry nested
+     * `tags` and `collaborators` arrays that get attached after
+     * the position itself is created.
      */
     private function confirmPosition(ExtractedRecord $draft): Position
     {
@@ -136,7 +161,12 @@ class DraftConfirmer
         $attributes = $this->filterFillable($payload, Position::class);
         $attributes['organization_id'] = $organization->id;
 
-        return Position::create($attributes);
+        $position = Position::create($attributes);
+
+        $this->attachNestedTags($position, $payload);
+        $this->attachNestedCollaborators($position, $payload, 'role_on_position');
+
+        return $position;
     }
 
     /**
@@ -195,7 +225,12 @@ class DraftConfirmer
             $attributes['parent_project_id'] = $parent->id;
         }
 
-        return Project::create($attributes);
+        $project = Project::create($attributes);
+
+        $this->attachNestedTags($project, $payload);
+        $this->attachNestedCollaborators($project, $payload, 'role_on_project');
+
+        return $project;
     }
 
     /**
@@ -276,7 +311,12 @@ class DraftConfirmer
             $attributes['position_id'] = $position->id;
         }
 
-        return Accomplishment::create($attributes);
+        $accomplishment = Accomplishment::create($attributes);
+
+        $this->attachNestedTags($accomplishment, $payload);
+        $this->attachNestedCollaborators($accomplishment, $payload, 'role_on_accomplishment');
+
+        return $accomplishment;
     }
 
     /**
@@ -336,6 +376,327 @@ class DraftConfirmer
     }
 
     /**
+     * Person confirmation. The payload may include
+     * `current_organization_name` referencing an existing organization;
+     * if present, resolve to FK. Everything else is fillable.
+     *
+     * If a person with the same name already exists in the catalog
+     * (case-insensitive match), the existing record is reused rather
+     * than duplicated. This handles the common case where a person
+     * was auto-created during an earlier collaborator-resolution step
+     * before the standalone Person draft was confirmed. We don't
+     * overwrite the existing person's fields — the user can edit
+     * manually if they want the AI's richer data merged in.
+     */
+    private function confirmPerson(ExtractedRecord $draft): Person
+    {
+        $payload = $draft->payload ?? [];
+
+        $name = $payload['name'] ?? null;
+        if (! $name || ! is_string($name) || trim($name) === '') {
+            throw new DraftConfirmationException(
+                'This person is missing a name in their payload.'
+            );
+        }
+
+        // If an existing person matches by name, return them and skip
+        // creation. The user can manually merge richer details later
+        // by editing the existing record.
+        $existing = $this->findPersonByName($name);
+        if ($existing) {
+            return $existing;
+        }
+
+        $attributes = $this->filterFillable($payload, Person::class);
+
+        // Resolve current organization if a name was provided. Absent
+        // is fine — the FK is nullable.
+        if (! empty($payload['current_organization_name'])) {
+            $orgName = $payload['current_organization_name'];
+            $organization = $this->findOrganizationByName($orgName);
+            if (! $organization) {
+                throw new DraftConfirmationException(
+                    "Can't confirm this person — their current organization " .
+                    "\"{$orgName}\" isn't in your catalog yet. Confirm the " .
+                    "organization draft first, or remove the organization " .
+                    "reference from this person's payload."
+                );
+            }
+            $attributes['current_organization_id'] = $organization->id;
+        }
+
+        return Person::create($attributes);
+    }
+
+    /**
+     * Link confirmation. Links are polymorphic — they attach to an
+     * organization, project, position, or accomplishment via
+     * (linkable_type, linkable_id). The payload uses a
+     * `linkable_type` discriminator string plus a name reference for
+     * the parent, scoped by an organization name when needed.
+     *
+     * Expected payload shape:
+     *   linkable_type: "organization" | "project" | "position" | "accomplishment"
+     *   linkable_name: <name of the parent entity>
+     *   organization_name: <required for position/project/accomplishment for scoping>
+     *   url: <required>
+     *   type, title, description, is_personal_appearance, date: <optional>
+     */
+    private function confirmLink(ExtractedRecord $draft): Link
+    {
+        $payload = $draft->payload ?? [];
+
+        $linkableType = $payload['linkable_type'] ?? null;
+        $linkableName = $payload['linkable_name'] ?? null;
+        $url = $payload['url'] ?? null;
+
+        if (! $linkableType || ! $linkableName) {
+            throw new DraftConfirmationException(
+                'This link is missing linkable_type or linkable_name in its payload. ' .
+                'Both are required to identify which entity the link attaches to.'
+            );
+        }
+
+        if (! $url) {
+            throw new DraftConfirmationException(
+                'This link is missing a url in its payload.'
+            );
+        }
+
+        // Resolve the parent entity based on the discriminator. Each
+        // type has its own lookup pattern — organizations are unique
+        // by name, but position/project/accomplishment need an
+        // organization context to disambiguate.
+        $linkable = match ($linkableType) {
+            'organization' => $this->findOrganizationByName($linkableName),
+            'project' => $this->resolveLinkableProject($linkableName, $payload),
+            'position' => $this->resolveLinkablePosition($linkableName, $payload),
+            'accomplishment' => $this->resolveLinkableAccomplishment($linkableName, $payload),
+            default => throw new DraftConfirmationException(
+                "Can't confirm this link — unknown linkable_type \"{$linkableType}\". " .
+                "Expected one of: organization, project, position, accomplishment."
+            ),
+        };
+
+        if (! $linkable) {
+            throw new DraftConfirmationException(
+                "Can't confirm this link — no {$linkableType} named " .
+                "\"{$linkableName}\" is in your catalog yet. Confirm the parent " .
+                "draft first."
+            );
+        }
+
+        $attributes = $this->filterFillable($payload, Link::class);
+        $attributes['linkable_type'] = $linkable::class;
+        $attributes['linkable_id'] = $linkable->id;
+
+        return Link::create($attributes);
+    }
+
+    /**
+     * Attach nested tags from a draft payload to a freshly-created
+     * parent entity. The payload's `tags` field is an array of strings
+     * (canonical names or aliases as the AI saw them). Each name is
+     * resolved against existing tags/aliases or creates a new tag.
+     *
+     * No-op if the payload has no tags field or it's empty.
+     */
+    private function attachNestedTags(Model $parent, array $payload): void
+    {
+        $tagNames = $payload['tags'] ?? null;
+        if (! is_array($tagNames) || empty($tagNames)) {
+            return;
+        }
+
+        $tagIds = [];
+        foreach ($tagNames as $tagName) {
+            if (! is_string($tagName) || trim($tagName) === '') {
+                continue;
+            }
+            $tag = $this->resolveTagByNameOrAlias($tagName);
+            $tagIds[] = $tag->id;
+        }
+
+        // sync() with attach-only semantics — pass true as second arg
+        // would detach unspecified, but here we're creating fresh
+        // and want to attach the AI's suggestions in addition to
+        // anything already there (which should be nothing on a
+        // freshly-created entity, but the conservative choice is
+        // syncWithoutDetaching).
+        if (! empty($tagIds)) {
+            $parent->tags()->syncWithoutDetaching(array_unique($tagIds));
+        }
+    }
+
+    /**
+     * Attach nested collaborators from a draft payload to a
+     * freshly-created parent entity. Each collaborator is
+     * `{name: string, role?: string}`. Person names are resolved or
+     * auto-created. The role lands in the pivot column specified by
+     * $roleColumn (varies per parent type: role_on_position,
+     * role_on_project, role_on_accomplishment).
+     *
+     * Empty role strings normalize to null at the pivot — matches the
+     * convention from PersonRules::buildCollaboratorSyncData used by
+     * the manual form picker, so AI-extracted data lands in the same
+     * shape as user-entered data.
+     */
+    private function attachNestedCollaborators(Model $parent, array $payload, string $roleColumn): void
+    {
+        $collaborators = $payload['collaborators'] ?? null;
+        if (! is_array($collaborators) || empty($collaborators)) {
+            return;
+        }
+
+        $syncData = [];
+        foreach ($collaborators as $collaborator) {
+            if (! is_array($collaborator) || empty($collaborator['name'])) {
+                continue;
+            }
+            $person = $this->resolvePersonByName($collaborator['name']);
+            $role = isset($collaborator['role']) && is_string($collaborator['role'])
+                ? trim($collaborator['role'])
+                : '';
+            $syncData[$person->id] = [
+                $roleColumn => $role !== '' ? $role : null,
+            ];
+        }
+
+        if (! empty($syncData)) {
+            $parent->collaborators()->syncWithoutDetaching($syncData);
+        }
+    }
+
+    /**
+     * Find an existing tag by name OR alias (both case-insensitive),
+     * or create a new tag with that name. Match order:
+     *
+     *   1. Case-insensitive match on tags.name
+     *   2. Case-insensitive match on tag_aliases.alias (returns the
+     *      aliased tag)
+     *   3. Create a new tag with the trimmed name and no category
+     *
+     * Auto-create is the right default for AI extraction — requiring
+     * the user to pre-create every tag the AI might emit defeats the
+     * purpose. Users can later merge duplicates or add aliases on the
+     * tag management page.
+     *
+     * The new tag's casing preserves the AI's emission ("Python" stays
+     * "Python") but the lookup is case-insensitive, so a follow-up
+     * extraction emitting "python" resolves to the existing tag rather
+     * than creating a duplicate.
+     */
+    private function resolveTagByNameOrAlias(string $name): Tag
+    {
+        $trimmed = trim($name);
+        $lowered = strtolower($trimmed);
+
+        // 1. Match by canonical name.
+        $tag = Tag::query()
+            ->whereRaw('LOWER(name) = ?', [$lowered])
+            ->first();
+        if ($tag) {
+            return $tag;
+        }
+
+        // 2. Match by alias.
+        $tag = Tag::query()
+            ->whereHas('aliases', fn ($q) =>
+                $q->whereRaw('LOWER(alias) = ?', [$lowered])
+            )
+            ->first();
+        if ($tag) {
+            return $tag;
+        }
+
+        // 3. Create new with the AI's casing preserved.
+        return Tag::create(['name' => $trimmed]);
+    }
+
+    /**
+     * Find an existing person by name (case-insensitive) or create a
+     * new one with just the name. This is the auto-create-on-first-
+     * sight pattern that supports the AI's "every mention emits a
+     * collaborator slot" output shape — the person doesn't need to
+     * already exist in the catalog.
+     *
+     * If a top-level person draft for the same person is later
+     * confirmed, confirmPerson() recognizes the existing record and
+     * reuses it rather than duplicating.
+     */
+    private function resolvePersonByName(string $name): Person
+    {
+        $trimmed = trim($name);
+
+        $person = $this->findPersonByName($trimmed);
+        if ($person) {
+            return $person;
+        }
+
+        return Person::create(['name' => $trimmed]);
+    }
+
+    /**
+     * Resolve a project for a link by name, scoped to an organization
+     * when present. Mirrors resolveProjectForAccomplishment's
+     * disambiguation rules.
+     */
+    private function resolveLinkableProject(string $projectName, array $payload): ?Project
+    {
+        $orgName = $payload['organization_name'] ?? null;
+
+        if ($orgName) {
+            $organization = $this->findOrganizationByName($orgName);
+            if (! $organization) {
+                return null;
+            }
+            return $this->findProjectByName($organization, $projectName);
+        }
+
+        // Without org context, require a unique match.
+        $matches = Project::query()
+            ->whereRaw('LOWER(name) = ?', [strtolower(trim($projectName))])
+            ->get();
+
+        return $matches->count() === 1 ? $matches->first() : null;
+    }
+
+    /**
+     * Resolve a position for a link. Positions are identified by
+     * org+title; the organization_name field is required.
+     */
+    private function resolveLinkablePosition(string $positionTitle, array $payload): ?Position
+    {
+        $orgName = $payload['organization_name'] ?? null;
+        if (! $orgName) {
+            return null;
+        }
+
+        $organization = $this->findOrganizationByName($orgName);
+        if (! $organization) {
+            return null;
+        }
+
+        return $this->findPositionByRef($organization, $positionTitle);
+    }
+
+    /**
+     * Resolve an accomplishment for a link by title. Accomplishments
+     * don't have a strict "unique within parent" constraint, so we
+     * look up globally by title and require a unique match. The AI
+     * is expected to give enough title specificity for this to work;
+     * if not, the user gets a clear error and can edit the draft.
+     */
+    private function resolveLinkableAccomplishment(string $title, array $payload): ?Accomplishment
+    {
+        $matches = Accomplishment::query()
+            ->whereRaw('LOWER(title) = ?', [strtolower(trim($title))])
+            ->get();
+
+        return $matches->count() === 1 ? $matches->first() : null;
+    }
+
+    /**
      * Filter a payload to only the keys that are fillable on the
      * target model. This drops AI-generated fields that don't map
      * to columns (like organization_name on a position, where we
@@ -370,6 +731,13 @@ class DraftConfirmer
     {
         return Project::query()
             ->where('organization_id', $organization->id)
+            ->whereRaw('LOWER(name) = ?', [strtolower(trim($name))])
+            ->first();
+    }
+
+    private function findPersonByName(string $name): ?Person
+    {
+        return Person::query()
             ->whereRaw('LOWER(name) = ?', [strtolower(trim($name))])
             ->first();
     }
