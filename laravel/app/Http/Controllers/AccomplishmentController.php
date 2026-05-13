@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\AccomplishmentRules;
+use App\Http\Requests\PersonRules;
 use App\Http\Requests\StoreAccomplishmentRequest;
 use App\Http\Requests\UpdateAccomplishmentRequest;
 use App\Models\Accomplishment;
@@ -59,8 +60,11 @@ class AccomplishmentController extends Controller
 
     public function store(StoreAccomplishmentRequest $request): RedirectResponse
     {
-        $accomplishment = Accomplishment::create($request->safe()->except('tag_ids'));
+        $accomplishment = Accomplishment::create($request->safe()->except(['tag_ids', 'collaborators']));
         $accomplishment->tags()->sync($request->input('tag_ids', []));
+        $accomplishment->collaborators()->sync(
+            PersonRules::buildCollaboratorSyncData($request->input('collaborators'), 'role_on_accomplishment')
+        );
 
         return redirect()
             ->route('accomplishments.show', $accomplishment)
@@ -92,8 +96,11 @@ class AccomplishmentController extends Controller
         UpdateAccomplishmentRequest $request,
         Accomplishment $accomplishment,
     ): RedirectResponse {
-        $accomplishment->update($request->safe()->except('tag_ids'));
+        $accomplishment->update($request->safe()->except(['tag_ids', 'collaborators']));
         $accomplishment->tags()->sync($request->input('tag_ids', []));
+        $accomplishment->collaborators()->sync(
+            PersonRules::buildCollaboratorSyncData($request->input('collaborators'), 'role_on_accomplishment')
+        );
 
         return redirect()
             ->route('accomplishments.show', $accomplishment)

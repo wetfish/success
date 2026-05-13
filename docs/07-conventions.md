@@ -102,3 +102,62 @@ Each step is mechanical and the changes leave the system in a working state once
 - `App\Enums\OrganizationStatus` — see `app/Enums/OrganizationStatus.php`. Includes `promptEnumString()`.
 
 Other value lists across the codebase (`LinkRules::TYPES`, `TagRules::CATEGORIES`, `PersonRules::RELATIONSHIP_TYPES`, position employment types, project visibility/status/contribution levels, accomplishment dating modes) still live as const arrays on their respective Rules classes. Most are single-file consumers and stay as constants. Convert one to an enum when it picks up its second consumer or when its values start touching the AI prompt.
+
+---
+
+## Autocomplete picker components
+
+Reusable form controls for selecting one or more existing records (tags, people, and future others) follow a shared structural pattern, even though each picker lives in its own file. Two such pickers exist today: `resources/js/tag-picker.js` and `resources/js/person-picker.js`. Future pickers (organization, person quick-add variant) should follow the same shape.
+
+### Why
+
+Three or four custom autocomplete components with different keyboard handling, different request-deduplication strategies, different chip semantics, and different ARIA roles becomes a maintenance burden quickly. By committing to a shared shape — even when the code itself isn't shared — anyone building or debugging a picker can reason about familiar machinery in unfamiliar code. The patterns transfer across pickers; the content (what rows look like, what chips hold) varies.
+
+### When to build a new picker
+
+When a form needs to select existing records from a potentially large set (more than ~20) where a plain `<select>` becomes unwieldy. Autocomplete plus the ability to scan-and-select keyboard-first beats scrolling through a long dropdown.
+
+When a small fixed set of options (~5–10) is all the user picks from, stay with a native `<select>` or radio group. The picker machinery is overkill there.
+
+### Required shape
+
+Each picker is a single JavaScript module under `resources/js/{thing}-picker.js`, a single CSS file under `resources/css/components/{thing}-picker.css` (imported from `app.css`), and a single Blade partial under `resources/views/{things}/_picker.blade.php`. The JS module auto-mounts on `[data-{thing}-picker]` elements on `DOMContentLoaded` — no manual init per form.
+
+The DOM structure inside `[data-{thing}-picker]`:
+
+- `[data-{thing}-picker-chips]` — container for selected chips
+- `[data-{thing}-picker-input]` — the search text input
+- `[data-{thing}-picker-dropdown]` — the `<ul>` for result rows
+- Per chip: `[data-{thing}-id="N"]` carrying the selected record's ID, with a `[data-{thing}-picker-remove]` button inside and hidden form inputs for submission
+
+Required data attributes on the root: `data-input-name` (base form field name), `data-search-url` (backend endpoint).
+
+### Required behavior
+
+- Search-as-you-type with **150ms debounce** — short enough to feel responsive, long enough to avoid firing a request on every keystroke.
+- **Async race protection** via a monotonic request token. The response handler discards results that arrived for an older request than the latest one.
+- **Keyboard navigation** — ArrowDown/ArrowUp to move highlight (skipping already-selected rows), Enter to select the highlighted row, Escape to close the dropdown. Enter is suppressed entirely while the dropdown is open even when no selection happens, so a stray Enter doesn't submit the parent form mid-pick.
+- **Already-selected indicator** — when a record matching the search query is already in the selection set, the result row shows a pink checkmark and is not clickable. Lets the user verify "yes, I already have this one" without flipping out of the picker.
+- **Click outside closes the dropdown.**
+- **Server-rendered initial chips** so the form degrades gracefully without JS — the user sees their current selection and can submit unchanged even if JS fails to load.
+
+### Required backend support
+
+A `GET /{things}/search?q=...` endpoint that:
+
+- Returns an empty array for empty or whitespace-only queries (the picker JS doesn't fire requests below `MIN_QUERY_LENGTH = 1`, but the endpoint should defend itself anyway).
+- Caps results at 5 (or some small constant — 5 fits comfortably in the dropdown without scrolling).
+- Returns ranked results — typically tier 1 for prefix matches, tier 2 for substring matches, with alphabetical tiebreaks within each tier.
+- Returns enough fields in the response payload to render the dropdown row's primary line *and* a disambiguation subline (e.g., for people: name on top, current title + organization below).
+- Is registered **before** the parent resource route to avoid `Route::resource` shadowing — `/people/search` would otherwise match `/people/{person}` with "search" interpreted as a person ID.
+
+### Current pickers
+
+- **Tag picker** — `resources/js/tag-picker.js`, `resources/css/components/tag-picker.css`, `resources/views/tags/_picker.blade.php`. Multi-select. Backend: `TagController::search`. Four-tier ranking (canonical name prefix/substring × alias prefix/substring), surfaces `matched_alias` for alias-matched rows.
+- **Person picker** — `resources/js/person-picker.js`, `resources/css/components/person-picker.css`, `resources/views/people/_picker.blade.php`. Multi-select with free-text role per chip. Backend: `PersonController::search`. Two-tier ranking (name prefix/substring).
+
+### Why pickers don't share code today
+
+Each picker's rendering logic is small enough (~400 lines of JS) that the shared patterns end up being the patterns themselves — the debounce constant, the request token mechanism, the keyboard handler shape. Extracting a base "AutocompletePicker" class would force decisions about what's customizable (row template? chip template? both?) before we know which axes of customization actually matter.
+
+The right time to extract a shared base is when a third picker arrives and the per-picker variation becomes clear. Two pickers is too few to know what to abstract; three or four will reveal the natural seams.

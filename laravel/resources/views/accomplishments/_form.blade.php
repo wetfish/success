@@ -283,6 +283,8 @@
     </div>
 
     @include('tags._picker', ['entity' => $accomplishment])
+
+    @include('people._picker', ['entity' => $accomplishment, 'roleField' => 'role_on_accomplishment'])
 </div>
 
 <script>

@@ -21,8 +21,13 @@
      */
     $grouped = $people->groupBy(fn ($p) => $p->currentOrganization?->id ?? '_unaffiliated');
 
+    // Filter rather than except(): Eloquent\Collection::except() is
+    // overridden to interpret its argument as a model key and calls
+    // getKey() on the items being excluded, which fails because the
+    // grouped values are plain Collections, not models. Using filter()
+    // sidesteps the override and works on a key match directly.
     $namedGroups = $grouped
-        ->except('_unaffiliated')
+        ->filter(fn ($group, $key) => $key !== '_unaffiliated')
         ->sortBy(fn ($group) => $group->first()->currentOrganization->name);
 
     $unaffiliated = $grouped->get('_unaffiliated', collect());

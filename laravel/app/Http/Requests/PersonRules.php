@@ -46,6 +46,66 @@ class PersonRules
     }
 
     /**
+     * Validation rules for the person picker's `collaborators[]` array
+     * input. Spread into a parent entity's Rules class via
+     * `+ PersonRules::collaboratorSyncRules()`. The union operator
+     * preserves keys; `collaborators` and `collaborators.*` shouldn't
+     * collide with anything else on the parent entity.
+     *
+     * The picker submits each chip as two fields:
+     *   collaborators[i][person_id]  — required, must exist in people
+     *   collaborators[i][role]       — optional free text, max 255
+     *
+     * The index i can be sparse (chips that have been removed leave
+     * gaps in the array). Laravel's validator handles sparse arrays
+     * via the `collaborators.*` wildcard.
+     */
+    public static function collaboratorSyncRules(): array
+    {
+        return [
+            'collaborators' => ['nullable', 'array'],
+            'collaborators.*.person_id' => ['required', 'integer', 'exists:people,id'],
+            'collaborators.*.role' => ['nullable', 'string', 'max:255'],
+        ];
+    }
+
+    /**
+     * Transform the raw `collaborators[]` form input into the array
+     * shape Eloquent's `sync()` expects: `[person_id => ['role_column'
+     * => 'role text'], ...]`. The role column name varies per parent
+     * entity (role_on_position, role_on_project, role_on_accomplishment),
+     * so the caller passes it in.
+     *
+     * Empty role strings normalize to null at this layer so the DB
+     * stores a consistent "no role" sentinel — downstream queries
+     * don't have to handle both '' and null.
+     *
+     * Returns an empty array when no collaborators are submitted,
+     * which `sync()` treats as "detach all" — matching the form's
+     * "what you see is what's saved" contract.
+     */
+    public static function buildCollaboratorSyncData(?array $collaborators, string $roleColumn): array
+    {
+        if (! $collaborators) {
+            return [];
+        }
+
+        $result = [];
+        foreach ($collaborators as $row) {
+            if (! is_array($row) || empty($row['person_id'])) {
+                continue;
+            }
+            $personId = (int) $row['person_id'];
+            $role = isset($row['role']) && is_string($row['role']) ? trim($row['role']) : '';
+            $result[$personId] = [
+                $roleColumn => $role !== '' ? $role : null,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
      * Normalize raw form input. Trims strings, converts empty strings
      * to null on nullable fields, lowercases email for storage
      * consistency (so the picker's autocomplete matches across casing).

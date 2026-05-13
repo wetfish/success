@@ -206,4 +206,12 @@ Route::delete('tags/{tag}/aliases/{alias}', [TagAliasController::class, 'destroy
  * Full resource — people have enough relationship surface (where
  * they appear as collaborators, which organization they're currently
  * at) to justify a dedicated show page, unlike tags. */
+
+/* The search endpoint must be declared BEFORE Route::resource —
+ * otherwise `people/search` matches the resource's `people/{person}`
+ * pattern with "search" interpreted as a person id, and route model
+ * binding fails with a 404. Same pattern as tags.search. */
+Route::get('people/search', [PersonController::class, 'search'])
+    ->name('people.search');
+
 Route::resource('people', PersonController::class);

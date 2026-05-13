@@ -491,6 +491,8 @@
 
     @include('tags._picker', ['entity' => $project])
 
+    @include('people._picker', ['entity' => $project, 'roleField' => 'role_on_project'])
+
     {{-- Notes --}}
     <div>
         <label for="user_notes" class="field-label">

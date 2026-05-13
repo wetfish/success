@@ -75,7 +75,7 @@ class ProjectRules
             'contribution_type' => ['nullable', 'string', 'max:255'],
             'team_size' => ['nullable', 'integer', 'min:1', 'max:10000'],
             'user_notes' => ['nullable', 'string', 'max:10000'],
-        ] + TagRules::syncRules();
+        ] + TagRules::syncRules() + PersonRules::collaboratorSyncRules();
     }
 
     /**

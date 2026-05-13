@@ -268,6 +268,8 @@
 
     @include('tags._picker', ['entity' => $position])
 
+    @include('people._picker', ['entity' => $position, 'roleField' => 'role_on_position'])
+
     {{-- General notes --}}
     <div>
         <label for="user_notes" class="field-label">

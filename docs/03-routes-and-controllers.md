@@ -13,6 +13,7 @@ All routes live in `routes/web.php`. No API routes yet — the app is server-ren
 | Link | partial resource (`store`, `edit`, `update`, `destroy`) | four: under organization, project, position, accomplishment |
 | Tag | resource minus `show` | — |
 | TagAlias | `store`, `destroy` only | nested under tag: `tags/{tag}/aliases` |
+| Person | full resource | — |
 
 Each entity has its own controller in `app/Http/Controllers/` and a corresponding `{Entity}CrudTest` in `tests/Feature/`.
 
@@ -117,6 +118,28 @@ Tags are flat reference data shared across taggable entities. The model is simpl
 **Source-document tagging is AI-only.** Source documents are schema-level taggable (the polymorphic join supports it) but are deliberately excluded from the picker. AI extraction populates source-document tags as part of the pipeline; surfacing the same picker there would create competing inputs without clear semantics. The dedicated review screen for AI-suggested tags lands with the AI-pipeline-extension slice. See the schema doc for the contract.
 
 **Cross-table invariant: tag names and aliases share a namespace.** A canonical tag name can't collide with any existing alias, and vice versa. Enforced at the form layer (closure rules in `TagRules` and `TagAliasRules` that produce friendly errors) and at the model layer (`validateInvariants()` on both `Tag` and `TagAlias`).
+
+## People and the collaborator picker
+
+People are managers, collaborators, mentors, and other individuals the user has worked with. Modeled once at `app/Models/Person.php` and attached to positions, projects, and accomplishments via three identically-shaped pivot tables (`position_collaborators`, `project_collaborators`, `accomplishment_collaborators`), each with a free-text `role_on_*` column.
+
+**Schema convergence: no dedicated manager FK.** An earlier iteration had `positions.reports_to_person_id` as a dedicated foreign key column. That diverged from the accomplishment-collaborator pattern and made the AI extraction surface awkward (two different shapes for "who was involved"). The convergence migration dropped the FK and unified everyone on the pivot-with-role pattern: a "manager" is just a collaborator with `role_on_position = "Manager"`. See `docs/01-database-schema.md` for the full rationale.
+
+**Full resource with show page.** Unlike tags (no show page, edit doubles as view), people have enough relationship surface — collaborator history across positions, projects, and accomplishments — to justify their own show page. The show page surfaces three sections, each rendered only if non-empty: positions, projects, accomplishments. Each row links to the parent record and displays the role from the pivot.
+
+**Index page groups by current organization.** People with a `current_organization_id` cluster under their org's name (linked to the org's show page); people without one fall into an "Unaffiliated" bucket rendered last regardless of alphabet. Within each group, alphabetical by name.
+
+**Picker is reusable across three parent forms.** The `people._picker` partial is included on position, project, and accomplishment forms. Each chip carries a hidden `person_id` input plus a visible free-text `role` input, submitted as `collaborators[i][person_id]` and `collaborators[i][role]`. Indices are monotonic and can be sparse — Laravel's validator handles sparse arrays via the `collaborators.*` wildcard.
+
+**Role suggestions via HTML datalist.** Common values ("Manager", "Direct report", "Peer", "Mentor", "Mentee", "Client", "Vendor") are presented via a `<datalist>` for the role input on each chip. Free text but with a soft nudge toward consistency. The datalist values aren't enforced — the user can type anything.
+
+**Shared helpers on `PersonRules`.** Two static methods power the per-entity wiring: `collaboratorSyncRules()` returns the validation rules (spread into each parent's Rules class via `+ PersonRules::collaboratorSyncRules()`), and `buildCollaboratorSyncData($collaborators, $roleColumn)` transforms the form payload into Eloquent's `sync()`-friendly shape with the appropriate role column. Same single-source-of-truth pattern as `TagRules::syncRules()`.
+
+**Sync semantics — destructive replacement.** The picker submits exactly the chips currently displayed; `sync()` replaces the entire set. Empty array detaches all. Empty role strings normalize to null at the form layer so the DB stores a consistent "no role specified" sentinel.
+
+**Soft-delete preserves collaborator pivots.** Pivot rows in the three collaborator tables are NOT touched by Person's soft-delete. The relationships still reference the soft-deleted person; restoring the person brings back the full history. Force-delete (DB cascade) is the only way to wipe pivots.
+
+**Search endpoint mirrors tags but simpler.** `GET /people/search?q=…` returns up to 5 ranked results (tier 1: name prefix, tier 2: name substring). Response includes `current_title` and `current_organization_name` for picker dropdown disambiguation. No alias machinery — people don't have aliases.
 
 ## Destroy redirects
 

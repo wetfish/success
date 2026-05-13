@@ -1,0 +1,167 @@
+/* Person picker component styles.
+ *
+ * Same architectural shape as the tag picker (chips container,
+ * search input + dropdown), but the chip is wider and richer:
+ * name + role input + remove button + hidden person_id.
+ *
+ * Lives in its own file under components/ per the convention
+ * established with the tag picker. Future picker-style components
+ * (or any reusable widget) should follow the same pattern.
+ */
+
+ @layer components {
+    .person-picker {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    /* Chips container — flex-wraps chips onto multiple lines. Each
+     * chip is wider than a tag chip (contains a role input), so on
+     * small viewports chips end up stacking one per row, which is
+     * fine. */
+    .person-picker-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+    .person-picker-chips:empty { display: none; }
+
+    /* Individual chip — contains a name, a role input, a remove
+     * button, and a hidden person_id input. Visually a "card" shape
+     * rather than a pill (a pill wouldn't fit the role input
+     * comfortably). */
+    .person-picker-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.375rem 0.5rem 0.375rem 0.75rem;
+        border-radius: 0.5rem;
+        background: rgb(255 255 255 / 0.06);
+        border: 1px solid var(--color-divider);
+        font-size: 0.875rem;
+        line-height: 1.25rem;
+        color: var(--color-text-primary);
+    }
+
+    .person-picker-chip-name {
+        font-weight: 500;
+        white-space: nowrap;
+    }
+
+    /* Inline role input. Sized to fit common role labels comfortably
+     * without dominating the chip. Overrides the .input class's
+     * default width since it's inline. */
+    .person-picker-chip-role.input {
+        width: 9rem;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.8125rem;
+    }
+
+    .person-picker-chip-remove {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.125rem;
+        height: 1.125rem;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--color-text-muted);
+        cursor: pointer;
+        border-radius: 9999px;
+    }
+    .person-picker-chip-remove:hover {
+        color: var(--color-text-primary);
+        background: rgb(255 255 255 / 0.08);
+    }
+    .person-picker-chip-remove:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 1px;
+    }
+
+    /* Search input + dropdown anchor. Mirrors tag picker structure. */
+    .person-picker-input-wrap {
+        position: relative;
+    }
+
+    .person-picker-dropdown {
+        position: absolute;
+        top: calc(100% + 0.25rem);
+        left: 0;
+        right: 0;
+        z-index: 10;
+        list-style: none;
+        padding: 0.25rem;
+        margin: 0;
+        background: var(--color-surface-input);
+        border: 1px solid var(--color-surface-input-border);
+        border-radius: 0.5rem;
+        box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+        max-height: 20rem;
+        overflow-y: auto;
+    }
+
+    /* Individual result row — two lines: name (primary) on top,
+     * context (current title and/or organization, muted) below.
+     * Inverted from the tag picker rows, which put muted category
+     * on top. People are primarily known by their name. */
+    .person-picker-result {
+        padding: 0.5rem 0.625rem;
+        border-radius: 0.375rem;
+        cursor: pointer;
+        transition: background-color 100ms ease-out;
+    }
+
+    .person-picker-result.is-highlighted {
+        background: var(--color-hover-overlay);
+    }
+
+    .person-picker-result.is-selected {
+        cursor: default;
+    }
+    .person-picker-result.is-selected:hover {
+        background: transparent;
+    }
+
+    .person-picker-result-name-row {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        line-height: 1.25rem;
+    }
+
+    .person-picker-result-name {
+        font-size: 0.9375rem;
+        font-weight: 500;
+        color: var(--color-text-primary);
+    }
+
+    .person-picker-result-context {
+        font-size: 0.75rem;
+        color: var(--color-text-secondary);
+        margin-top: 0.125rem;
+    }
+
+    /* Pink checkmark for already-selected rows. Same pattern as
+     * the tag picker. */
+    .person-picker-result-check {
+        margin-left: auto;
+        color: var(--color-accent);
+        display: inline-flex;
+        align-items: center;
+    }
+
+    /* "No matches" state. */
+    .person-picker-result--empty {
+        padding: 0.625rem;
+        color: var(--color-text-muted);
+        font-size: 0.875rem;
+        font-style: italic;
+        cursor: default;
+        text-align: center;
+    }
+    .person-picker-result--empty:hover {
+        background: transparent;
+    }
+}

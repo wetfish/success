@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\PersonRules;
 use App\Http\Requests\PositionRules;
 use App\Http\Requests\StorePositionRequest;
 use App\Http\Requests\UpdatePositionRequest;
@@ -30,8 +31,11 @@ class PositionController extends Controller
 
     public function store(StorePositionRequest $request): RedirectResponse
     {
-        $position = Position::create($request->safe()->except('tag_ids'));
+        $position = Position::create($request->safe()->except(['tag_ids', 'collaborators']));
         $position->tags()->sync($request->input('tag_ids', []));
+        $position->collaborators()->sync(
+            PersonRules::buildCollaboratorSyncData($request->input('collaborators'), 'role_on_position')
+        );
 
         return redirect()
             ->route('positions.show', $position)
@@ -64,8 +68,11 @@ class PositionController extends Controller
         UpdatePositionRequest $request,
         Position $position,
     ): RedirectResponse {
-        $position->update($request->safe()->except('tag_ids'));
+        $position->update($request->safe()->except(['tag_ids', 'collaborators']));
         $position->tags()->sync($request->input('tag_ids', []));
+        $position->collaborators()->sync(
+            PersonRules::buildCollaboratorSyncData($request->input('collaborators'), 'role_on_position')
+        );
 
         return redirect()
             ->route('positions.show', $position)

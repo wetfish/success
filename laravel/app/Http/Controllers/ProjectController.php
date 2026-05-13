@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\PersonRules;
 use App\Http\Requests\ProjectRules;
 use App\Http\Requests\StoreProjectRequest;
 use App\Http\Requests\UpdateProjectRequest;
@@ -76,8 +77,11 @@ class ProjectController extends Controller
 
     public function store(StoreProjectRequest $request): RedirectResponse
     {
-        $project = Project::create($request->safe()->except('tag_ids'));
+        $project = Project::create($request->safe()->except(['tag_ids', 'collaborators']));
         $project->tags()->sync($request->input('tag_ids', []));
+        $project->collaborators()->sync(
+            PersonRules::buildCollaboratorSyncData($request->input('collaborators'), 'role_on_project')
+        );
 
         return redirect()
             ->route('projects.show', $project)
@@ -115,8 +119,11 @@ class ProjectController extends Controller
         UpdateProjectRequest $request,
         Project $project,
     ): RedirectResponse {
-        $project->update($request->safe()->except('tag_ids'));
+        $project->update($request->safe()->except(['tag_ids', 'collaborators']));
         $project->tags()->sync($request->input('tag_ids', []));
+        $project->collaborators()->sync(
+            PersonRules::buildCollaboratorSyncData($request->input('collaborators'), 'role_on_project')
+        );
 
         return redirect()
             ->route('projects.show', $project)

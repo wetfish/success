@@ -49,7 +49,7 @@ class AccomplishmentRules
             'date' => ['nullable', 'date', 'required_without:period_start', 'prohibits:period_start'],
             'period_start' => ['nullable', 'date', 'required_without:date'],
             'period_end' => ['nullable', 'date', 'after_or_equal:period_start'],
-        ] + TagRules::syncRules();
+        ] + TagRules::syncRules() + PersonRules::collaboratorSyncRules();
     }
 
     public static function messages(): array
