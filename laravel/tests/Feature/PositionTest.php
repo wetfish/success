@@ -63,8 +63,11 @@ class PositionTest extends TestCase
     }
 
     #[Test]
-    public function a_position_can_have_a_reporting_relationship(): void
+    public function a_position_can_have_a_manager_via_collaborators(): void
     {
+        // Manager relationships now live in the position_collaborators
+        // pivot with role_on_position = "Manager", not as a dedicated
+        // FK on positions. See the people-schema convergence migration.
         $organization = $this->makeOrganization();
 
         $manager = Person::create([
@@ -78,16 +81,23 @@ class PositionTest extends TestCase
             'employment_type' => 'full_time',
             'start_date' => '2022-01-01',
             'location_arrangement' => 'remote',
-            'reports_to_person_id' => $manager->id,
         ]);
 
-        $this->assertSame($manager->id, $position->reportsTo->id);
-        $this->assertSame('Alex Manager', $position->reportsTo->name);
+        $position->collaborators()->attach($manager, ['role_on_position' => 'Manager']);
+
+        $position->refresh();
+        $this->assertCount(1, $position->collaborators);
+        $this->assertSame($manager->id, $position->collaborators->first()->id);
+        $this->assertSame('Manager', $position->collaborators->first()->pivot->role_on_position);
     }
 
     #[Test]
-    public function force_deleting_a_manager_sets_position_reports_to_null(): void
+    public function force_deleting_a_collaborator_removes_their_pivot_row(): void
     {
+        // The position_collaborators FK on person_id cascades on delete,
+        // so force-deleting a person also wipes their pivot rows. The
+        // position itself remains intact — only the relationship goes
+        // away, which is the correct semantics.
         $organization = $this->makeOrganization();
 
         $manager = Person::create([
@@ -101,13 +111,15 @@ class PositionTest extends TestCase
             'employment_type' => 'full_time',
             'start_date' => '2022-01-01',
             'location_arrangement' => 'remote',
-            'reports_to_person_id' => $manager->id,
         ]);
 
-        $manager->forceDelete();
-        $position->refresh();
+        $position->collaborators()->attach($manager, ['role_on_position' => 'Manager']);
+        $this->assertDatabaseCount('position_collaborators', 1);
 
-        $this->assertNull($position->reports_to_person_id);
+        $manager->forceDelete();
+
+        $this->assertDatabaseCount('position_collaborators', 0);
+        $this->assertNotNull($position->fresh()); // position survives
     }
 
     #[Test]

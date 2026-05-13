@@ -6,6 +6,7 @@ use App\Http\Controllers\DraftMergeController;
 use App\Http\Controllers\DraftReviewController;
 use App\Http\Controllers\LinkController;
 use App\Http\Controllers\OrganizationController;
+use App\Http\Controllers\PersonController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\SourceDocumentController;
@@ -195,3 +196,14 @@ Route::post('tags/{tag}/aliases', [TagAliasController::class, 'store'])
 
 Route::delete('tags/{tag}/aliases/{alias}', [TagAliasController::class, 'destroy'])
     ->name('tag-aliases.destroy');
+
+/* People are managers, collaborators, mentors, and other individuals
+ * the user has worked with. Modeled once and attached to positions,
+ * projects, and accomplishments via identically-shaped pivot tables
+ * with role columns. See the schema doc's "People and connections"
+ * section for the convergence rationale.
+ *
+ * Full resource — people have enough relationship surface (where
+ * they appear as collaborators, which organization they're currently
+ * at) to justify a dedicated show page, unlike tags. */
+Route::resource('people', PersonController::class);

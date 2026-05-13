@@ -486,13 +486,19 @@ class TagCrudTest extends TestCase
     #[Test]
     public function tier_two_alias_prefix_matches(): void
     {
+        // The fixture must be picked carefully: the query must prefix-
+        // match the alias but NOT the canonical name (otherwise the
+        // tier 1 name-prefix hit would beat the alias-prefix hit, since
+        // tier 1 < tier 2). `PostgreSQL` + alias `pgsql` gives clean
+        // separation — `pgs` is a prefix of `pgsql` but not of
+        // `postgresql`.
         $tag = $this->makeTag('PostgreSQL', 'tool');
-        $tag->aliases()->create(['alias' => 'postgres']);
+        $tag->aliases()->create(['alias' => 'pgsql']);
 
-        $response = $this->getJson(route('tags.search', ['q' => 'postgr']));
+        $response = $this->getJson(route('tags.search', ['q' => 'pgs']));
         $response->assertJsonFragment([
             'name' => 'PostgreSQL',
-            'matched_alias' => 'postgres',
+            'matched_alias' => 'pgsql',
         ]);
     }
 
@@ -546,13 +552,17 @@ class TagCrudTest extends TestCase
     #[Test]
     public function name_match_beats_alias_match_at_same_tier(): void
     {
-        // "test" matches:
-        //   - "Pytest" via tier 3 (name substring)
-        //   - "JUnit" via tier 4 (alias substring "test-tool")
-        // Tier 3 < tier 4, so Pytest comes first.
+        // Both matches must land in the same tier-pair for this test
+        // to verify "name beats alias at equal precedence." The
+        // comparison is between tier 3 (name substring) and tier 4
+        // (alias substring), which are the "same-tier-ish" pair when
+        // no prefix matches exist. To keep it tier 3 vs tier 4 — and
+        // not accidentally tier 2 — the alias must NOT start with the
+        // query. `unit-test` contains `test` but doesn't start with
+        // it, so the alias-substring hit lands at tier 4 cleanly.
         $this->makeTag('Pytest', 'framework');
         $junit = $this->makeTag('JUnit', 'framework');
-        $junit->aliases()->create(['alias' => 'test-tool']);
+        $junit->aliases()->create(['alias' => 'unit-test']);
 
         $response = $this->getJson(route('tags.search', ['q' => 'test']));
         $data = $response->json();

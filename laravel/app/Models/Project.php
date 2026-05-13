@@ -125,6 +125,13 @@ class Project extends Model
         return $this->hasMany(Accomplishment::class);
     }
 
+    public function collaborators(): BelongsToMany
+    {
+        return $this->belongsToMany(Person::class, 'project_collaborators')
+            ->withPivot('role_on_project')
+            ->withTimestamps();
+    }
+
     public function links(): MorphMany
     {
         return $this->morphMany(Link::class, 'linkable');

@@ -13,9 +13,14 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * A person — a manager, collaborator, mentor, recruiter, or other
  * individual relevant to the user's career.
  *
- * Modeled once and referenced from multiple places: positions point
- * at managers, accomplishments link to collaborators, the eventual
- * relationship-management feature tracks follow-up cadence with people.
+ * Modeled once and referenced from multiple places via pivot tables
+ * with role columns. A person can be attached to positions
+ * (position_collaborators, role_on_position — e.g. "Manager"),
+ * projects (project_collaborators, role_on_project), and
+ * accomplishments (accomplishment_collaborators, role_on_accomplishment).
+ * The three pivots have identical shape: one parent FK, one person FK,
+ * one role free-text column. This keeps the people-attachment pattern
+ * uniform across the schema.
  *
  * For MVP, a person is associated with a single current organization.
  * A person_organization_history table will be added later to track
@@ -36,6 +41,20 @@ class Person extends Model
     public function currentOrganization(): BelongsTo
     {
         return $this->belongsTo(Organization::class, 'current_organization_id');
+    }
+
+    public function positions(): BelongsToMany
+    {
+        return $this->belongsToMany(Position::class, 'position_collaborators')
+            ->withPivot('role_on_position')
+            ->withTimestamps();
+    }
+
+    public function projects(): BelongsToMany
+    {
+        return $this->belongsToMany(Project::class, 'project_collaborators')
+            ->withPivot('role_on_project')
+            ->withTimestamps();
     }
 
     public function accomplishments(): BelongsToMany

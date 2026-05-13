@@ -102,6 +102,12 @@
                         Organizations
                     </a>
                     <a
+                        href="{{ route('people.index') }}"
+                        class="nav-modal-link {{ request()->routeIs('people.*') ? 'is-current' : '' }}"
+                    >
+                        People
+                    </a>
+                    <a
                         href="{{ route('tags.index') }}"
                         class="nav-modal-link {{ request()->routeIs('tags.*') ? 'is-current' : '' }}"
                     >

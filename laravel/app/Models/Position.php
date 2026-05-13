@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
@@ -21,10 +22,12 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * were hired to do," which is genuinely top-down information that
  * doesn't emerge from project data.
  *
- * TODO: reports_to_person_id is fillable and the relationship works,
- * but the field is not yet exposed in the Position form UI pending the
- * Person UI slice. When Person CRUD lands, add a Person picker to the
- * form template — no model changes needed at that point.
+ * Manager relationships live in the position_collaborators pivot
+ * (role_on_position = "Manager") rather than a dedicated FK column.
+ * This keeps the people-attachment shape consistent across positions,
+ * projects, and accomplishments: one pattern, one picker, one AI
+ * extraction format. See the schema doc's "People and connections"
+ * section for the rationale.
  */
 #[Fillable([
     'organization_id',
@@ -37,7 +40,6 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'team_name',
     'team_size_immediate',
     'team_size_extended',
-    'reports_to_person_id',
     'mandate',
     'reason_for_leaving',
     'reason_for_leaving_notes',
@@ -72,9 +74,11 @@ class Position extends Model
         return $this->belongsTo(Organization::class);
     }
 
-    public function reportsTo(): BelongsTo
+    public function collaborators(): BelongsToMany
     {
-        return $this->belongsTo(Person::class, 'reports_to_person_id');
+        return $this->belongsToMany(Person::class, 'position_collaborators')
+            ->withPivot('role_on_position')
+            ->withTimestamps();
     }
 
     public function projects(): HasMany
