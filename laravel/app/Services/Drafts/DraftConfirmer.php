@@ -9,7 +9,8 @@ use App\Models\Organization;
 use App\Models\Person;
 use App\Models\Position;
 use App\Models\Project;
-use App\Models\Tag;
+use App\Services\Resolution\PersonResolver;
+use App\Services\Resolution\TagResolver;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 
@@ -50,6 +51,25 @@ use Illuminate\Support\Facades\DB;
  */
 class DraftConfirmer
 {
+    private TagResolver $tagResolver;
+    private PersonResolver $personResolver;
+
+    /**
+     * Constructor accepts resolver instances via DI but defaults to
+     * fresh instantiation if not provided. The resolvers are
+     * stateless and cheap to construct, so default instantiation
+     * produces the same behavior as injection — this keeps existing
+     * `new DraftConfirmer()` call sites (notably in tests) working
+     * without forcing every caller to pass resolvers.
+     */
+    public function __construct(
+        ?TagResolver $tagResolver = null,
+        ?PersonResolver $personResolver = null,
+    ) {
+        $this->tagResolver = $tagResolver ?? new TagResolver();
+        $this->personResolver = $personResolver ?? new PersonResolver();
+    }
+
     /**
      * Confirm a pending draft. Creates the corresponding real record
      * and marks the draft as confirmed with match_record_* pointing
@@ -127,7 +147,7 @@ class DraftConfirmer
             $this->filterFillable($payload, Organization::class)
         );
 
-        $this->attachNestedTags($organization, $payload);
+        $this->attachNestedTags($organization, $draft);
 
         return $organization;
     }
@@ -163,8 +183,8 @@ class DraftConfirmer
 
         $position = Position::create($attributes);
 
-        $this->attachNestedTags($position, $payload);
-        $this->attachNestedCollaborators($position, $payload, 'role_on_position');
+        $this->attachNestedTags($position, $draft);
+        $this->attachNestedCollaborators($position, $draft, 'role_on_position');
 
         return $position;
     }
@@ -227,8 +247,8 @@ class DraftConfirmer
 
         $project = Project::create($attributes);
 
-        $this->attachNestedTags($project, $payload);
-        $this->attachNestedCollaborators($project, $payload, 'role_on_project');
+        $this->attachNestedTags($project, $draft);
+        $this->attachNestedCollaborators($project, $draft, 'role_on_project');
 
         return $project;
     }
@@ -313,8 +333,8 @@ class DraftConfirmer
 
         $accomplishment = Accomplishment::create($attributes);
 
-        $this->attachNestedTags($accomplishment, $payload);
-        $this->attachNestedCollaborators($accomplishment, $payload, 'role_on_accomplishment');
+        $this->attachNestedTags($accomplishment, $draft);
+        $this->attachNestedCollaborators($accomplishment, $draft, 'role_on_accomplishment');
 
         return $accomplishment;
     }
@@ -402,7 +422,7 @@ class DraftConfirmer
         // If an existing person matches by name, return them and skip
         // creation. The user can manually merge richer details later
         // by editing the existing record.
-        $existing = $this->findPersonByName($name);
+        $existing = $this->personResolver->findByName($name);
         if ($existing) {
             return $existing;
         }
@@ -497,32 +517,57 @@ class DraftConfirmer
      * Attach nested tags from a draft payload to a freshly-created
      * parent entity. The payload's `tags` field is an array of strings
      * (canonical names or aliases as the AI saw them). Each name is
-     * resolved against existing tags/aliases or creates a new tag.
+     * resolved against existing tags/aliases or creates a new tag —
+     * the actual lookup logic lives in TagResolver.
+     *
+     * Before resolving, the source document's review_decisions are
+     * consulted:
+     *   - Names in `rejected_tags` are skipped entirely (no attachment)
+     *   - Names in `renamed_tags` are replaced with their corrected
+     *     value before resolution (e.g., "Postgres 14" → "Postgres",
+     *     then Postgres goes through normal name-or-alias lookup)
+     *
+     * Both decisions are matched case-insensitively against the AI's
+     * emitted name, since the AI's casing may differ from what the
+     * user typed during review.
      *
      * No-op if the payload has no tags field or it's empty.
      */
-    private function attachNestedTags(Model $parent, array $payload): void
+    private function attachNestedTags(Model $parent, ExtractedRecord $draft): void
     {
+        $payload = $draft->payload ?? [];
         $tagNames = $payload['tags'] ?? null;
         if (! is_array($tagNames) || empty($tagNames)) {
             return;
         }
+
+        $sourceDocument = $draft->sourceDocument;
+        $rejected = $sourceDocument ? $sourceDocument->rejectedTags() : [];
+        $renamed = $sourceDocument ? $sourceDocument->renamedTags() : [];
 
         $tagIds = [];
         foreach ($tagNames as $tagName) {
             if (! is_string($tagName) || trim($tagName) === '') {
                 continue;
             }
-            $tag = $this->resolveTagByNameOrAlias($tagName);
+
+            // Skip names the user explicitly rejected.
+            if ($this->nameIsRejected($tagName, $rejected)) {
+                continue;
+            }
+
+            // Apply rename if the user corrected this name's spelling
+            // during review. The corrected name still goes through
+            // normal name-or-alias resolution.
+            $resolveAs = $this->applyRename($tagName, $renamed);
+
+            $tag = $this->tagResolver->resolve($resolveAs);
             $tagIds[] = $tag->id;
         }
 
-        // sync() with attach-only semantics — pass true as second arg
-        // would detach unspecified, but here we're creating fresh
-        // and want to attach the AI's suggestions in addition to
-        // anything already there (which should be nothing on a
-        // freshly-created entity, but the conservative choice is
-        // syncWithoutDetaching).
+        // syncWithoutDetaching deduplicates by key — if the AI emitted
+        // the same tag twice, or two emissions resolved to the same
+        // existing tag, we still get one pivot row.
         if (! empty($tagIds)) {
             $parent->tags()->syncWithoutDetaching(array_unique($tagIds));
         }
@@ -531,29 +576,54 @@ class DraftConfirmer
     /**
      * Attach nested collaborators from a draft payload to a
      * freshly-created parent entity. Each collaborator is
-     * `{name: string, role?: string}`. Person names are resolved or
-     * auto-created. The role lands in the pivot column specified by
-     * $roleColumn (varies per parent type: role_on_position,
+     * `{name: string, role?: string}`. Person names are resolved via
+     * PersonResolver — find an existing person by case-insensitive
+     * name, or create a new one. The role lands in the pivot column
+     * specified by $roleColumn (varies per parent type: role_on_position,
      * role_on_project, role_on_accomplishment).
+     *
+     * Before resolving, the source document's review_decisions are
+     * consulted (symmetric to attachNestedTags):
+     *   - Names in `rejected_collaborators` are skipped entirely
+     *   - Names in `renamed_collaborators` are replaced before
+     *     resolution (e.g., "Sarah Chen" → "Sarah K Chen", which then
+     *     finds the existing canonical record rather than creating a
+     *     duplicate)
      *
      * Empty role strings normalize to null at the pivot — matches the
      * convention from PersonRules::buildCollaboratorSyncData used by
      * the manual form picker, so AI-extracted data lands in the same
      * shape as user-entered data.
      */
-    private function attachNestedCollaborators(Model $parent, array $payload, string $roleColumn): void
+    private function attachNestedCollaborators(Model $parent, ExtractedRecord $draft, string $roleColumn): void
     {
+        $payload = $draft->payload ?? [];
         $collaborators = $payload['collaborators'] ?? null;
         if (! is_array($collaborators) || empty($collaborators)) {
             return;
         }
+
+        $sourceDocument = $draft->sourceDocument;
+        $rejected = $sourceDocument ? $sourceDocument->rejectedCollaborators() : [];
+        $renamed = $sourceDocument ? $sourceDocument->renamedCollaborators() : [];
 
         $syncData = [];
         foreach ($collaborators as $collaborator) {
             if (! is_array($collaborator) || empty($collaborator['name'])) {
                 continue;
             }
-            $person = $this->resolvePersonByName($collaborator['name']);
+
+            $name = $collaborator['name'];
+
+            // Skip names the user rejected during review.
+            if ($this->nameIsRejected($name, $rejected)) {
+                continue;
+            }
+
+            // Apply rename before resolving.
+            $resolveAs = $this->applyRename($name, $renamed);
+
+            $person = $this->personResolver->resolve($resolveAs);
             $role = isset($collaborator['role']) && is_string($collaborator['role'])
                 ? trim($collaborator['role'])
                 : '';
@@ -568,72 +638,37 @@ class DraftConfirmer
     }
 
     /**
-     * Find an existing tag by name OR alias (both case-insensitive),
-     * or create a new tag with that name. Match order:
-     *
-     *   1. Case-insensitive match on tags.name
-     *   2. Case-insensitive match on tag_aliases.alias (returns the
-     *      aliased tag)
-     *   3. Create a new tag with the trimmed name and no category
-     *
-     * Auto-create is the right default for AI extraction — requiring
-     * the user to pre-create every tag the AI might emit defeats the
-     * purpose. Users can later merge duplicates or add aliases on the
-     * tag management page.
-     *
-     * The new tag's casing preserves the AI's emission ("Python" stays
-     * "Python") but the lookup is case-insensitive, so a follow-up
-     * extraction emitting "python" resolves to the existing tag rather
-     * than creating a duplicate.
+     * Case-insensitive check whether $name appears in the $rejected
+     * list. The AI may emit "Postgres" while the user rejected
+     * "postgres" during review — both should be treated as the same
+     * decision.
      */
-    private function resolveTagByNameOrAlias(string $name): Tag
+    private function nameIsRejected(string $name, array $rejected): bool
     {
-        $trimmed = trim($name);
-        $lowered = strtolower($trimmed);
-
-        // 1. Match by canonical name.
-        $tag = Tag::query()
-            ->whereRaw('LOWER(name) = ?', [$lowered])
-            ->first();
-        if ($tag) {
-            return $tag;
+        $lowered = strtolower(trim($name));
+        foreach ($rejected as $rejectedName) {
+            if (is_string($rejectedName) && strtolower(trim($rejectedName)) === $lowered) {
+                return true;
+            }
         }
-
-        // 2. Match by alias.
-        $tag = Tag::query()
-            ->whereHas('aliases', fn ($q) =>
-                $q->whereRaw('LOWER(alias) = ?', [$lowered])
-            )
-            ->first();
-        if ($tag) {
-            return $tag;
-        }
-
-        // 3. Create new with the AI's casing preserved.
-        return Tag::create(['name' => $trimmed]);
+        return false;
     }
 
     /**
-     * Find an existing person by name (case-insensitive) or create a
-     * new one with just the name. This is the auto-create-on-first-
-     * sight pattern that supports the AI's "every mention emits a
-     * collaborator slot" output shape — the person doesn't need to
-     * already exist in the catalog.
-     *
-     * If a top-level person draft for the same person is later
-     * confirmed, confirmPerson() recognizes the existing record and
-     * reuses it rather than duplicating.
+     * Apply a rename map (AI-emitted name → user-corrected name) to
+     * the given name. Matches case-insensitively on the map key.
+     * Returns the corrected name if a match exists, otherwise returns
+     * the original name unchanged.
      */
-    private function resolvePersonByName(string $name): Person
+    private function applyRename(string $name, array $renamed): string
     {
-        $trimmed = trim($name);
-
-        $person = $this->findPersonByName($trimmed);
-        if ($person) {
-            return $person;
+        $lowered = strtolower(trim($name));
+        foreach ($renamed as $from => $to) {
+            if (is_string($from) && is_string($to) && strtolower(trim($from)) === $lowered) {
+                return $to;
+            }
         }
-
-        return Person::create(['name' => $trimmed]);
+        return $name;
     }
 
     /**
@@ -731,13 +766,6 @@ class DraftConfirmer
     {
         return Project::query()
             ->where('organization_id', $organization->id)
-            ->whereRaw('LOWER(name) = ?', [strtolower(trim($name))])
-            ->first();
-    }
-
-    private function findPersonByName(string $name): ?Person
-    {
-        return Person::query()
             ->whereRaw('LOWER(name) = ?', [strtolower(trim($name))])
             ->first();
     }

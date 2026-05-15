@@ -972,4 +972,186 @@ class DraftConfirmerTest extends TestCase
         $this->assertCount(1, $accomplishment->collaborators);
         $this->assertSame('Reviewer', $accomplishment->collaborators->first()->pivot->role_on_accomplishment);
     }
+
+    // ────────────────────────────────────────────────────────────
+    // Review decisions: tag rejection and rename
+    // ────────────────────────────────────────────────────────────
+
+    #[Test]
+    public function rejected_tag_is_skipped_when_attaching_nested_tags(): void
+    {
+        $doc = $this->makeDocument();
+        $doc->update(['review_decisions' => ['rejected_tags' => ['Postgres']]]);
+        Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $draft = $this->makeDraft($doc, 'project', [
+            'organization_name' => 'Acme',
+            'name' => 'A project',
+            'visibility' => 'internal',
+            'contribution_level' => 'core',
+            'tags' => ['Postgres', 'Python'],
+        ]);
+
+        $project = (new DraftConfirmer())->confirm($draft);
+
+        // Only Python should attach; Postgres was rejected.
+        $tagNames = $project->tags->pluck('name')->all();
+        $this->assertSame(['Python'], $tagNames);
+    }
+
+    #[Test]
+    public function tag_rejection_match_is_case_insensitive(): void
+    {
+        // AI emitted "Postgres"; user rejected "postgres". They're the
+        // same name and should be treated as the same decision.
+        $doc = $this->makeDocument();
+        $doc->update(['review_decisions' => ['rejected_tags' => ['postgres']]]);
+        Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $draft = $this->makeDraft($doc, 'project', [
+            'organization_name' => 'Acme',
+            'name' => 'A project',
+            'visibility' => 'internal',
+            'contribution_level' => 'core',
+            'tags' => ['Postgres'],
+        ]);
+
+        $project = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertCount(0, $project->tags);
+    }
+
+    #[Test]
+    public function renamed_tag_is_replaced_before_resolution(): void
+    {
+        // AI emitted "Postgres 14"; user renamed to "Postgres". The
+        // confirmer should resolve "Postgres" (creating it new since
+        // no existing match) rather than "Postgres 14".
+        $doc = $this->makeDocument();
+        $doc->update(['review_decisions' => ['renamed_tags' => ['Postgres 14' => 'Postgres']]]);
+        Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $draft = $this->makeDraft($doc, 'project', [
+            'organization_name' => 'Acme',
+            'name' => 'A project',
+            'visibility' => 'internal',
+            'contribution_level' => 'core',
+            'tags' => ['Postgres 14'],
+        ]);
+
+        $project = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertCount(1, $project->tags);
+        $this->assertSame('Postgres', $project->tags->first()->name);
+        // Crucially, no "Postgres 14" tag was created.
+        $this->assertSame(0, \App\Models\Tag::where('name', 'Postgres 14')->count());
+    }
+
+    #[Test]
+    public function rename_resolution_still_goes_through_alias_lookup(): void
+    {
+        // The rename redirects "Postgres 14" → "Postgres", which then
+        // happens to be an alias of "PostgreSQL". The final resolution
+        // should land on PostgreSQL.
+        $pgTag = \App\Models\Tag::create(['name' => 'PostgreSQL', 'category' => 'tool']);
+        $pgTag->aliases()->create(['alias' => 'Postgres']);
+        $doc = $this->makeDocument();
+        $doc->update(['review_decisions' => ['renamed_tags' => ['Postgres 14' => 'Postgres']]]);
+        Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $draft = $this->makeDraft($doc, 'project', [
+            'organization_name' => 'Acme',
+            'name' => 'A project',
+            'visibility' => 'internal',
+            'contribution_level' => 'core',
+            'tags' => ['Postgres 14'],
+        ]);
+
+        $project = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertSame($pgTag->id, $project->tags->first()->id);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // Review decisions: collaborator rejection and rename
+    // ────────────────────────────────────────────────────────────
+
+    #[Test]
+    public function rejected_collaborator_is_skipped(): void
+    {
+        $doc = $this->makeDocument();
+        $doc->update(['review_decisions' => ['rejected_collaborators' => ['Anonymous Mentor']]]);
+        Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $draft = $this->makeDraft($doc, 'position', $this->positionPayload([
+            'collaborators' => [
+                ['name' => 'Anonymous Mentor', 'role' => 'Mentor'],
+                ['name' => 'Sarah Chen', 'role' => 'Manager'],
+            ],
+        ]));
+
+        $position = (new DraftConfirmer())->confirm($draft);
+
+        $names = $position->collaborators->pluck('name')->all();
+        $this->assertSame(['Sarah Chen'], $names);
+    }
+
+    #[Test]
+    public function renamed_collaborator_resolves_to_existing_person(): void
+    {
+        // The user knows the canonical record is "Sarah K Chen" not
+        // "Sarah Chen" — the rename redirects resolution to the
+        // existing record.
+        $canonical = \App\Models\Person::create(['name' => 'Sarah K Chen']);
+        $doc = $this->makeDocument();
+        $doc->update(['review_decisions' => ['renamed_collaborators' => ['Sarah Chen' => 'Sarah K Chen']]]);
+        Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $draft = $this->makeDraft($doc, 'position', $this->positionPayload([
+            'collaborators' => [
+                ['name' => 'Sarah Chen', 'role' => 'Manager'],
+            ],
+        ]));
+
+        $position = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertSame(1, \App\Models\Person::count());
+        $this->assertSame($canonical->id, $position->collaborators->first()->id);
+    }
+
+    #[Test]
+    public function collaborator_rejection_is_case_insensitive(): void
+    {
+        $doc = $this->makeDocument();
+        $doc->update(['review_decisions' => ['rejected_collaborators' => ['sarah chen']]]);
+        Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $draft = $this->makeDraft($doc, 'position', $this->positionPayload([
+            'collaborators' => [
+                ['name' => 'Sarah Chen', 'role' => 'Manager'],
+            ],
+        ]));
+
+        $position = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertCount(0, $position->collaborators);
+    }
+
+    #[Test]
+    public function review_decisions_with_no_relevant_entries_are_no_ops(): void
+    {
+        // Even with review_decisions set, names not in the rejection
+        // or rename lists should resolve normally.
+        $doc = $this->makeDocument();
+        $doc->update(['review_decisions' => [
+            'rejected_tags' => ['Something Unrelated'],
+            'renamed_tags' => ['Other Thing' => 'Different Thing'],
+        ]]);
+        Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $draft = $this->makeDraft($doc, 'project', [
+            'organization_name' => 'Acme',
+            'name' => 'A project',
+            'visibility' => 'internal',
+            'contribution_level' => 'core',
+            'tags' => ['Python'],
+        ]);
+
+        $project = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertCount(1, $project->tags);
+        $this->assertSame('Python', $project->tags->first()->name);
+    }
 }
