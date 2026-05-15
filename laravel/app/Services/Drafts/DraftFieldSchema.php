@@ -22,19 +22,20 @@ use App\Models\Link;
  *
  * For each field:
  *   - type: 'text' | 'textarea' | 'date' | 'select' | 'number' |
- *           'boolean' | 'tag_list' | 'collaborator_list'
+ *           'boolean' | 'tag_list' | 'collaborator_list' | 'link_list'
  *   - required: true if the schema can't accept null/empty
  *   - options: for 'select' type, the allowed values
  *   - label: short human-readable label for the form
  *   - help: optional hint text below the input
  *
- * The 'tag_list' and 'collaborator_list' types describe nested
- * attachments on entity drafts (a project draft can carry a list of
- * tags and a list of collaborators that get materialized as pivot
- * rows when the draft is confirmed). The view layer special-cases
- * these — they're not scalar fields, so the generic input rendering
- * doesn't apply. See DraftConfirmer's attachNestedTags and
- * attachNestedCollaborators for the materialization side.
+ * The 'tag_list', 'collaborator_list', and 'link_list' types describe
+ * nested attachments on entity drafts (a project draft can carry a
+ * list of tags, collaborators, and links that get materialized as
+ * pivot or polymorphic rows when the draft is confirmed). The view
+ * layer special-cases these — they're not scalar fields, so the
+ * generic input rendering doesn't apply. See DraftConfirmer's
+ * attachNestedTags, attachNestedCollaborators, and attachNestedLinks
+ * for the materialization side.
  */
 class DraftFieldSchema
 {
@@ -85,6 +86,12 @@ class DraftFieldSchema
                 'label' => 'Tags',
                 'required' => false,
                 'help' => 'Tags the AI surfaced from the source document. Resolved against existing tag names and aliases on confirm; unknown tags auto-create.',
+            ],
+            'links' => [
+                'type' => 'link_list',
+                'label' => 'Links',
+                'required' => false,
+                'help' => 'URLs the AI extracted in connection with this organization. Each carries a type (website, careers, etc.) from the closed Link::TYPES enum.',
             ],
         ];
     }
@@ -144,6 +151,12 @@ class DraftFieldSchema
                 'label' => 'Collaborators',
                 'required' => false,
                 'help' => 'People mentioned in connection with this position. Each has a free-text role (e.g., "Manager", "Peer"). Unknown people auto-create.',
+            ],
+            'links' => [
+                'type' => 'link_list',
+                'label' => 'Links',
+                'required' => false,
+                'help' => 'URLs the AI extracted in connection with this position.',
             ],
         ];
     }
@@ -214,6 +227,12 @@ class DraftFieldSchema
                 'required' => false,
                 'help' => 'People mentioned in connection with this project. Each has a free-text role (e.g., "Tech Lead", "Reviewer"). Unknown people auto-create.',
             ],
+            'links' => [
+                'type' => 'link_list',
+                'label' => 'Links',
+                'required' => false,
+                'help' => 'URLs the AI extracted in connection with this project (source repos, live demos, docs, etc.).',
+            ],
         ];
     }
 
@@ -272,6 +291,12 @@ class DraftFieldSchema
                 'label' => 'Collaborators',
                 'required' => false,
                 'help' => 'People mentioned in connection with this accomplishment. Each has a free-text role (e.g., "Co-author", "Reviewer"). Unknown people auto-create.',
+            ],
+            'links' => [
+                'type' => 'link_list',
+                'label' => 'Links',
+                'required' => false,
+                'help' => 'URLs the AI extracted in connection with this accomplishment (talk recordings, blog posts, postmortems, etc.).',
             ],
         ];
     }

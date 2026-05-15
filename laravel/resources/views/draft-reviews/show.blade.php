@@ -113,7 +113,8 @@
                                 $type = $config['type'];
                                 $required = $config['required'] ?? false;
                                 $isTextarea = $type === 'textarea';
-                                $colSpan = $isTextarea ? 'sm:col-span-2' : '';
+                                $isList = in_array($type, ['tag_list', 'collaborator_list', 'link_list'], true);
+                                $colSpan = ($isTextarea || $isList) ? 'sm:col-span-2' : '';
                             @endphp
                             <div class="{{ $colSpan }}">
                                 <label for="field-{{ $key }}" class="metadata-label block mb-1">
@@ -162,6 +163,41 @@
                                         class="input"
                                         @if ($required) required @endif
                                     >
+                                @elseif ($isList)
+                                    {{-- Read-only list rendering. The proper editable UI
+                                         for nested tags/collaborators/links is a separate
+                                         work item; until then, these display as bullet
+                                         lists with type-specific item formatting. The
+                                         controller's confirm() uses array_merge against
+                                         the existing payload, so omitting form inputs
+                                         here doesn't drop the array — it preserves it
+                                         through submit. --}}
+                                    @if (is_array($value) && count($value) > 0)
+                                        <ul class="text-sm leading-relaxed list-disc list-inside">
+                                            @foreach ($value as $item)
+                                                <li>
+                                                    @if ($type === 'tag_list')
+                                                        {{ $item['name'] ?? '(unnamed)' }}
+                                                        @if (! empty($item['category']))
+                                                            <span style="color: var(--color-text-muted);">({{ $item['category'] }})</span>
+                                                        @endif
+                                                    @elseif ($type === 'collaborator_list')
+                                                        {{ $item['name'] ?? '(unnamed)' }}
+                                                        @if (! empty($item['role']))
+                                                            <span style="color: var(--color-text-muted);">— {{ $item['role'] }}</span>
+                                                        @endif
+                                                    @elseif ($type === 'link_list')
+                                                        <a href="{{ $item['url'] ?? '#' }}" target="_blank" rel="noopener" class="link">{{ ! empty($item['title']) ? $item['title'] : ($item['url'] ?? '(no url)') }}</a>
+                                                        @if (! empty($item['type']))
+                                                            <span style="color: var(--color-text-muted);">— {{ $item['type'] }}</span>
+                                                        @endif
+                                                    @endif
+                                                </li>
+                                            @endforeach
+                                        </ul>
+                                    @else
+                                        <p class="text-sm" style="color: var(--color-text-muted);">None.</p>
+                                    @endif
                                 @else
                                     <input
                                         type="text"

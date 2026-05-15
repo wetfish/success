@@ -34,8 +34,17 @@ class TagResolver
 {
     /**
      * Resolve a name to a Tag. Creates a new tag if no match exists.
+     *
+     * The optional $category is applied only when creating a new tag.
+     * Existing tags keep their stored category — user curation wins
+     * over per-document AI guesses. The category is validated against
+     * Tag::CATEGORIES; an unrecognized value is silently dropped and
+     * the new tag is created with `category = null`, so the review UI
+     * can prompt the user to categorize. This matches the defense-in-
+     * depth principle: the prompt tells the AI the closed list, but a
+     * deviation shouldn't lose the underlying mention.
      */
-    public function resolve(string $name): Tag
+    public function resolve(string $name, ?string $category = null): Tag
     {
         $trimmed = trim($name);
         $lowered = strtolower($trimmed);
@@ -58,8 +67,17 @@ class TagResolver
             return $tag;
         }
 
-        // 3. Create new with the AI's casing preserved.
-        return Tag::create(['name' => $trimmed]);
+        // 3. Create new with the AI's casing preserved. Category is
+        // applied only if it's in the closed enum; otherwise null
+        // (defense-in-depth — the AI may emit a category we don't know).
+        $validCategory = $category !== null && in_array($category, Tag::CATEGORIES, true)
+            ? $category
+            : null;
+
+        return Tag::create([
+            'name' => $trimmed,
+            'category' => $validCategory,
+        ]);
     }
 
     /**

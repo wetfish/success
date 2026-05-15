@@ -101,6 +101,43 @@ class TagResolverTest extends TestCase
         $this->assertSame($existing->id, $result->id);
     }
 
+    #[Test]
+    public function resolve_applies_category_when_creating_new_tag(): void
+    {
+        $result = (new TagResolver())->resolve('Kubernetes', 'tool');
+
+        $this->assertSame(1, Tag::count());
+        $this->assertSame('Kubernetes', $result->name);
+        $this->assertSame('tool', $result->category);
+    }
+
+    #[Test]
+    public function resolve_does_not_overwrite_category_on_existing_tag(): void
+    {
+        // User has curated this tag's category. A later extraction emits
+        // a different category — the user's value must win.
+        $existing = Tag::create(['name' => 'Python', 'category' => 'language']);
+
+        $result = (new TagResolver())->resolve('Python', 'tool');
+
+        $this->assertSame($existing->id, $result->id);
+        $this->assertSame('language', $result->fresh()->category);
+    }
+
+    #[Test]
+    public function resolve_drops_invalid_category_silently_when_creating(): void
+    {
+        // The AI emitted a category outside the closed Tag::CATEGORIES
+        // enum. The mention is still worth preserving — drop the
+        // category, create the tag with null, let the user categorize
+        // during review.
+        $result = (new TagResolver())->resolve('GraphQL', 'query-language');
+
+        $this->assertSame(1, Tag::count());
+        $this->assertSame('GraphQL', $result->name);
+        $this->assertNull($result->category);
+    }
+
     // ────────────────────────────────────────────────────────────
     // preview() — read-only lookup
     // ────────────────────────────────────────────────────────────

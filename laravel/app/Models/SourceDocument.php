@@ -37,7 +37,6 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'body',
     'context_date',
     'context_notes',
-    'review_decisions',
 ])]
 class SourceDocument extends Model
 {
@@ -47,53 +46,7 @@ class SourceDocument extends Model
     {
         return [
             'context_date' => 'date',
-            'review_decisions' => 'array',
         ];
-    }
-
-    /**
-     * Tag names the user explicitly rejected during review. The
-     * DraftConfirmer skips these when materializing nested tag
-     * attachments from extracted record payloads. Compared
-     * case-insensitively against AI-emitted tag names.
-     */
-    public function rejectedTags(): array
-    {
-        return ($this->review_decisions ?? [])['rejected_tags'] ?? [];
-    }
-
-    /**
-     * AI-emitted-name → user-corrected-name map for tags. When the AI
-     * emitted "Postgres 14" and the user wants the catalog to use
-     * "Postgres" instead, the rename is recorded here. The confirmer
-     * applies the rename before resolving — the corrected name then
-     * goes through normal name-or-alias lookup.
-     */
-    public function renamedTags(): array
-    {
-        return ($this->review_decisions ?? [])['renamed_tags'] ?? [];
-    }
-
-    /**
-     * Collaborator names the user rejected during review. The
-     * DraftConfirmer skips these when materializing collaborator
-     * attachments from extracted record payloads.
-     */
-    public function rejectedCollaborators(): array
-    {
-        return ($this->review_decisions ?? [])['rejected_collaborators'] ?? [];
-    }
-
-    /**
-     * AI-emitted-name → user-corrected-name map for collaborators.
-     * Equivalent to renamedTags but for people. Used when the AI
-     * emitted "Sarah Chen" but the user knows the canonical name in
-     * the catalog is "Sarah K Chen" — the rename gets the right
-     * existing record attached.
-     */
-    public function renamedCollaborators(): array
-    {
-        return ($this->review_decisions ?? [])['renamed_collaborators'] ?? [];
     }
 
     public function accomplishments(): BelongsToMany

@@ -170,4 +170,95 @@ class DraftFormConfirmationTest extends TestCase
         $this->assertArrayNotHasKey('unknown_field', $draft->payload);
         $this->assertArrayNotHasKey('another_extra', $draft->payload);
     }
+
+    #[Test]
+    public function review_page_renders_when_payload_contains_nested_array_fields(): void
+    {
+        // Regression: before the milestone 4.6 architecture shift, all
+        // payload fields were scalar strings, and the review form's
+        // default text-input branch worked for every key. After the
+        // shift, entity drafts carry nested `tags`, `collaborators`,
+        // and `links` arrays — Blade's `{{ $value }}` would call
+        // htmlspecialchars() on an array and throw a TypeError,
+        // making the page 500. The view now special-cases list types.
+        $doc = $this->makeDocument();
+        Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $draft = $this->makeDraft($doc, 'project', [
+            'organization_name' => 'Acme',
+            'name' => 'Migration',
+            'visibility' => 'internal',
+            'contribution_level' => 'core',
+            'tags' => [
+                ['name' => 'Postgres', 'category' => 'tool'],
+                ['name' => 'Python', 'category' => 'language'],
+            ],
+            'collaborators' => [
+                ['name' => 'Sarah Chen', 'role' => 'Manager'],
+            ],
+            'links' => [
+                ['url' => 'https://github.com/acme/migration', 'type' => 'github', 'title' => 'Source repo'],
+            ],
+        ]);
+
+        $response = $this->get(route('source-documents.review.show', [
+            'sourceDocument' => $doc,
+            'draft' => $draft,
+        ]));
+
+        $response->assertOk();
+        // Confirm the nested data actually rendered (not just that we
+        // got a 200 from an empty page).
+        $response->assertSee('Postgres');
+        $response->assertSee('Sarah Chen');
+        $response->assertSee('https://github.com/acme/migration', escape: false);
+    }
+
+    #[Test]
+    public function nested_array_payload_fields_survive_form_submit_through_array_merge(): void
+    {
+        // The view renders nested arrays read-only — no <input> tags
+        // for tags/collaborators/links. The controller's array_merge
+        // is supposed to preserve those existing payload values when
+        // the form doesn't supply them. This test asserts that
+        // contract: confirming the draft via the form should still
+        // materialize the nested tag attachment.
+        $doc = $this->makeDocument();
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $draft = $this->makeDraft($doc, 'project', [
+            'organization_name' => 'Acme',
+            'name' => 'Migration',
+            'visibility' => 'internal',
+            'contribution_level' => 'core',
+            'tags' => [
+                ['name' => 'Postgres', 'category' => 'tool'],
+            ],
+        ]);
+
+        // Form submits only the scalar fields — no `tags` input exists
+        // in the rendered HTML.
+        $this->post(
+            route('source-documents.review.confirm', [
+                'sourceDocument' => $doc,
+                'draft' => $draft,
+            ]),
+            [
+                'organization_name' => 'Acme',
+                'name' => 'Migration',
+                'visibility' => 'internal',
+                'contribution_level' => 'core',
+            ]
+        );
+
+        $draft->refresh();
+        // Payload still has the tags after array_merge.
+        $this->assertCount(1, $draft->payload['tags']);
+        $this->assertSame('Postgres', $draft->payload['tags'][0]['name']);
+
+        // And the materialized project picked up the tag pivot row.
+        $project = \App\Models\Project::first();
+        $this->assertNotNull($project);
+        $this->assertCount(1, $project->tags);
+        $this->assertSame('Postgres', $project->tags->first()->name);
+        $this->assertSame('tool', $project->tags->first()->category);
+    }
 }

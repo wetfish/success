@@ -96,7 +96,6 @@ class DraftConfirmer
                     'project' => $this->confirmProject($draft),
                     'accomplishment' => $this->confirmAccomplishment($draft),
                     'person' => $this->confirmPerson($draft),
-                    'link' => $this->confirmLink($draft),
                     default => throw new DraftConfirmationException(
                         "Unknown record type: {$draft->record_type}"
                     ),
@@ -148,6 +147,7 @@ class DraftConfirmer
         );
 
         $this->attachNestedTags($organization, $draft);
+        $this->attachNestedLinks($organization, $draft);
 
         return $organization;
     }
@@ -185,6 +185,7 @@ class DraftConfirmer
 
         $this->attachNestedTags($position, $draft);
         $this->attachNestedCollaborators($position, $draft, 'role_on_position');
+        $this->attachNestedLinks($position, $draft);
 
         return $position;
     }
@@ -249,6 +250,7 @@ class DraftConfirmer
 
         $this->attachNestedTags($project, $draft);
         $this->attachNestedCollaborators($project, $draft, 'role_on_project');
+        $this->attachNestedLinks($project, $draft);
 
         return $project;
     }
@@ -335,6 +337,7 @@ class DraftConfirmer
 
         $this->attachNestedTags($accomplishment, $draft);
         $this->attachNestedCollaborators($accomplishment, $draft, 'role_on_accomplishment');
+        $this->attachNestedLinks($accomplishment, $draft);
 
         return $accomplishment;
     }
@@ -449,119 +452,48 @@ class DraftConfirmer
     }
 
     /**
-     * Link confirmation. Links are polymorphic — they attach to an
-     * organization, project, position, or accomplishment via
-     * (linkable_type, linkable_id). The payload uses a
-     * `linkable_type` discriminator string plus a name reference for
-     * the parent, scoped by an organization name when needed.
-     *
-     * Expected payload shape:
-     *   linkable_type: "organization" | "project" | "position" | "accomplishment"
-     *   linkable_name: <name of the parent entity>
-     *   organization_name: <required for position/project/accomplishment for scoping>
-     *   url: <required>
-     *   type, title, description, is_personal_appearance, date: <optional>
-     */
-    private function confirmLink(ExtractedRecord $draft): Link
-    {
-        $payload = $draft->payload ?? [];
-
-        $linkableType = $payload['linkable_type'] ?? null;
-        $linkableName = $payload['linkable_name'] ?? null;
-        $url = $payload['url'] ?? null;
-
-        if (! $linkableType || ! $linkableName) {
-            throw new DraftConfirmationException(
-                'This link is missing linkable_type or linkable_name in its payload. ' .
-                'Both are required to identify which entity the link attaches to.'
-            );
-        }
-
-        if (! $url) {
-            throw new DraftConfirmationException(
-                'This link is missing a url in its payload.'
-            );
-        }
-
-        // Resolve the parent entity based on the discriminator. Each
-        // type has its own lookup pattern — organizations are unique
-        // by name, but position/project/accomplishment need an
-        // organization context to disambiguate.
-        $linkable = match ($linkableType) {
-            'organization' => $this->findOrganizationByName($linkableName),
-            'project' => $this->resolveLinkableProject($linkableName, $payload),
-            'position' => $this->resolveLinkablePosition($linkableName, $payload),
-            'accomplishment' => $this->resolveLinkableAccomplishment($linkableName, $payload),
-            default => throw new DraftConfirmationException(
-                "Can't confirm this link — unknown linkable_type \"{$linkableType}\". " .
-                "Expected one of: organization, project, position, accomplishment."
-            ),
-        };
-
-        if (! $linkable) {
-            throw new DraftConfirmationException(
-                "Can't confirm this link — no {$linkableType} named " .
-                "\"{$linkableName}\" is in your catalog yet. Confirm the parent " .
-                "draft first."
-            );
-        }
-
-        $attributes = $this->filterFillable($payload, Link::class);
-        $attributes['linkable_type'] = $linkable::class;
-        $attributes['linkable_id'] = $linkable->id;
-
-        return Link::create($attributes);
-    }
-
-    /**
      * Attach nested tags from a draft payload to a freshly-created
-     * parent entity. The payload's `tags` field is an array of strings
-     * (canonical names or aliases as the AI saw them). Each name is
-     * resolved against existing tags/aliases or creates a new tag —
-     * the actual lookup logic lives in TagResolver.
+     * parent entity. The payload's `tags` field is an array of
+     * `{name: string, category?: string}` objects — the AI emits the
+     * name as it appears in the document and the category from the
+     * closed Tag::CATEGORIES enum.
      *
-     * Before resolving, the source document's review_decisions are
-     * consulted:
-     *   - Names in `rejected_tags` are skipped entirely (no attachment)
-     *   - Names in `renamed_tags` are replaced with their corrected
-     *     value before resolution (e.g., "Postgres 14" → "Postgres",
-     *     then Postgres goes through normal name-or-alias lookup)
-     *
-     * Both decisions are matched case-insensitively against the AI's
-     * emitted name, since the AI's casing may differ from what the
-     * user typed during review.
+     * Each entry is resolved against existing tags/aliases or creates
+     * a new tag — the actual lookup logic lives in TagResolver. The
+     * category is applied only when a new tag is created; existing
+     * tags keep their stored category (user curation wins). Invalid
+     * categories are dropped at the resolver, not here.
      *
      * No-op if the payload has no tags field or it's empty.
+     *
+     * Per-name rejection and rename decisions made during AI review
+     * are not consulted here. Those decisions live as their own
+     * extracted_records rows (record_type = `tag`) and are applied
+     * at their own confirmation step in the wizard flow — see
+     * milestone 4.6 in docs/06-planned-features.md.
      */
     private function attachNestedTags(Model $parent, ExtractedRecord $draft): void
     {
         $payload = $draft->payload ?? [];
-        $tagNames = $payload['tags'] ?? null;
-        if (! is_array($tagNames) || empty($tagNames)) {
+        $tagEntries = $payload['tags'] ?? null;
+        if (! is_array($tagEntries) || empty($tagEntries)) {
             return;
         }
 
-        $sourceDocument = $draft->sourceDocument;
-        $rejected = $sourceDocument ? $sourceDocument->rejectedTags() : [];
-        $renamed = $sourceDocument ? $sourceDocument->renamedTags() : [];
-
         $tagIds = [];
-        foreach ($tagNames as $tagName) {
-            if (! is_string($tagName) || trim($tagName) === '') {
+        foreach ($tagEntries as $entry) {
+            if (! is_array($entry) || empty($entry['name']) || ! is_string($entry['name'])) {
+                continue;
+            }
+            if (trim($entry['name']) === '') {
                 continue;
             }
 
-            // Skip names the user explicitly rejected.
-            if ($this->nameIsRejected($tagName, $rejected)) {
-                continue;
-            }
+            $category = isset($entry['category']) && is_string($entry['category']) && trim($entry['category']) !== ''
+                ? trim($entry['category'])
+                : null;
 
-            // Apply rename if the user corrected this name's spelling
-            // during review. The corrected name still goes through
-            // normal name-or-alias resolution.
-            $resolveAs = $this->applyRename($tagName, $renamed);
-
-            $tag = $this->tagResolver->resolve($resolveAs);
+            $tag = $this->tagResolver->resolve($entry['name'], $category);
             $tagIds[] = $tag->id;
         }
 
@@ -582,18 +514,16 @@ class DraftConfirmer
      * specified by $roleColumn (varies per parent type: role_on_position,
      * role_on_project, role_on_accomplishment).
      *
-     * Before resolving, the source document's review_decisions are
-     * consulted (symmetric to attachNestedTags):
-     *   - Names in `rejected_collaborators` are skipped entirely
-     *   - Names in `renamed_collaborators` are replaced before
-     *     resolution (e.g., "Sarah Chen" → "Sarah K Chen", which then
-     *     finds the existing canonical record rather than creating a
-     *     duplicate)
-     *
      * Empty role strings normalize to null at the pivot — matches the
      * convention from PersonRules::buildCollaboratorSyncData used by
      * the manual form picker, so AI-extracted data lands in the same
      * shape as user-entered data.
+     *
+     * Per-name rejection and rename decisions made during AI review
+     * are not consulted here. Those decisions live as their own
+     * extracted_records rows (record_type = `person`) and are applied
+     * at their own confirmation step in the wizard flow — see
+     * milestone 4.6 in docs/06-planned-features.md.
      */
     private function attachNestedCollaborators(Model $parent, ExtractedRecord $draft, string $roleColumn): void
     {
@@ -603,27 +533,13 @@ class DraftConfirmer
             return;
         }
 
-        $sourceDocument = $draft->sourceDocument;
-        $rejected = $sourceDocument ? $sourceDocument->rejectedCollaborators() : [];
-        $renamed = $sourceDocument ? $sourceDocument->renamedCollaborators() : [];
-
         $syncData = [];
         foreach ($collaborators as $collaborator) {
             if (! is_array($collaborator) || empty($collaborator['name'])) {
                 continue;
             }
 
-            $name = $collaborator['name'];
-
-            // Skip names the user rejected during review.
-            if ($this->nameIsRejected($name, $rejected)) {
-                continue;
-            }
-
-            // Apply rename before resolving.
-            $resolveAs = $this->applyRename($name, $renamed);
-
-            $person = $this->personResolver->resolve($resolveAs);
+            $person = $this->personResolver->resolve($collaborator['name']);
             $role = isset($collaborator['role']) && is_string($collaborator['role'])
                 ? trim($collaborator['role'])
                 : '';
@@ -638,97 +554,60 @@ class DraftConfirmer
     }
 
     /**
-     * Case-insensitive check whether $name appears in the $rejected
-     * list. The AI may emit "Postgres" while the user rejected
-     * "postgres" during review — both should be treated as the same
-     * decision.
+     * Attach nested links from a draft payload to a freshly-created
+     * parent entity. The payload's `links` field is an array of
+     * `{url, type?, title?, description?, is_personal_appearance?, date?}`
+     * objects. The parent is the entity the link is nested under —
+     * Laravel's morphMany handles the (linkable_type, linkable_id)
+     * columns automatically when the row is created via the relation.
+     *
+     * The `type` field is validated against Link::TYPES; an unrecognized
+     * value defaults to "other" since the column is non-nullable. A
+     * missing or empty `type` also defaults to "other". This matches
+     * the defense-in-depth principle used elsewhere in this class —
+     * we preserve the mention rather than fail the confirmation.
+     *
+     * Entries without a usable url are skipped. No-op if the payload
+     * has no links field or it's empty.
      */
-    private function nameIsRejected(string $name, array $rejected): bool
+    private function attachNestedLinks(Model $parent, ExtractedRecord $draft): void
     {
-        $lowered = strtolower(trim($name));
-        foreach ($rejected as $rejectedName) {
-            if (is_string($rejectedName) && strtolower(trim($rejectedName)) === $lowered) {
-                return true;
+        $payload = $draft->payload ?? [];
+        $linkEntries = $payload['links'] ?? null;
+        if (! is_array($linkEntries) || empty($linkEntries)) {
+            return;
+        }
+
+        foreach ($linkEntries as $entry) {
+            if (! is_array($entry) || empty($entry['url']) || ! is_string($entry['url'])) {
+                continue;
             }
-        }
-        return false;
-    }
-
-    /**
-     * Apply a rename map (AI-emitted name → user-corrected name) to
-     * the given name. Matches case-insensitively on the map key.
-     * Returns the corrected name if a match exists, otherwise returns
-     * the original name unchanged.
-     */
-    private function applyRename(string $name, array $renamed): string
-    {
-        $lowered = strtolower(trim($name));
-        foreach ($renamed as $from => $to) {
-            if (is_string($from) && is_string($to) && strtolower(trim($from)) === $lowered) {
-                return $to;
+            if (trim($entry['url']) === '') {
+                continue;
             }
-        }
-        return $name;
-    }
 
-    /**
-     * Resolve a project for a link by name, scoped to an organization
-     * when present. Mirrors resolveProjectForAccomplishment's
-     * disambiguation rules.
-     */
-    private function resolveLinkableProject(string $projectName, array $payload): ?Project
-    {
-        $orgName = $payload['organization_name'] ?? null;
+            $type = isset($entry['type']) && is_string($entry['type']) && in_array($entry['type'], Link::TYPES, true)
+                ? $entry['type']
+                : 'other';
 
-        if ($orgName) {
-            $organization = $this->findOrganizationByName($orgName);
-            if (! $organization) {
-                return null;
+            $attributes = [
+                'url' => trim($entry['url']),
+                'type' => $type,
+            ];
+
+            // Optional descriptive fields — pass through when present.
+            foreach (['title', 'description', 'date'] as $field) {
+                if (isset($entry[$field]) && is_string($entry[$field]) && trim($entry[$field]) !== '') {
+                    $attributes[$field] = $entry[$field];
+                }
             }
-            return $this->findProjectByName($organization, $projectName);
+
+            if (isset($entry['is_personal_appearance']) && is_bool($entry['is_personal_appearance'])) {
+                $attributes['is_personal_appearance'] = $entry['is_personal_appearance'];
+            }
+
+            $parent->links()->create($attributes);
         }
-
-        // Without org context, require a unique match.
-        $matches = Project::query()
-            ->whereRaw('LOWER(name) = ?', [strtolower(trim($projectName))])
-            ->get();
-
-        return $matches->count() === 1 ? $matches->first() : null;
-    }
-
-    /**
-     * Resolve a position for a link. Positions are identified by
-     * org+title; the organization_name field is required.
-     */
-    private function resolveLinkablePosition(string $positionTitle, array $payload): ?Position
-    {
-        $orgName = $payload['organization_name'] ?? null;
-        if (! $orgName) {
-            return null;
-        }
-
-        $organization = $this->findOrganizationByName($orgName);
-        if (! $organization) {
-            return null;
-        }
-
-        return $this->findPositionByRef($organization, $positionTitle);
-    }
-
-    /**
-     * Resolve an accomplishment for a link by title. Accomplishments
-     * don't have a strict "unique within parent" constraint, so we
-     * look up globally by title and require a unique match. The AI
-     * is expected to give enough title specificity for this to work;
-     * if not, the user gets a clear error and can edit the draft.
-     */
-    private function resolveLinkableAccomplishment(string $title, array $payload): ?Accomplishment
-    {
-        $matches = Accomplishment::query()
-            ->whereRaw('LOWER(title) = ?', [strtolower(trim($title))])
-            ->get();
-
-        return $matches->count() === 1 ? $matches->first() : null;
     }
 
     /**

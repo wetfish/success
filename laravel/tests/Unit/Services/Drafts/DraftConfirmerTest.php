@@ -566,138 +566,6 @@ class DraftConfirmerTest extends TestCase
     }
 
     // ────────────────────────────────────────────────────────────
-    // Link draft confirmation
-    // ────────────────────────────────────────────────────────────
-
-    #[Test]
-    public function confirming_a_link_draft_to_an_organization_creates_link_with_morph_fields(): void
-    {
-        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
-        $doc = $this->makeDocument();
-        $draft = $this->makeDraft($doc, 'link', [
-            'linkable_type' => 'organization',
-            'linkable_name' => 'Acme',
-            'url' => 'https://acme.example.com',
-            'type' => 'website',
-        ]);
-
-        $link = (new DraftConfirmer())->confirm($draft);
-
-        $this->assertInstanceOf(\App\Models\Link::class, $link);
-        $this->assertSame(Organization::class, $link->linkable_type);
-        $this->assertSame($org->id, $link->linkable_id);
-        $this->assertSame('https://acme.example.com', $link->url);
-    }
-
-    #[Test]
-    public function confirming_a_link_draft_to_a_project_resolves_via_org_scope(): void
-    {
-        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
-        $project = $this->makeProject($org, ['name' => 'Migration Project']);
-        $doc = $this->makeDocument();
-        $draft = $this->makeDraft($doc, 'link', [
-            'linkable_type' => 'project',
-            'linkable_name' => 'Migration Project',
-            'organization_name' => 'Acme',
-            'url' => 'https://github.com/acme/migration',
-            'type' => 'repo',
-        ]);
-
-        $link = (new DraftConfirmer())->confirm($draft);
-
-        $this->assertSame(Project::class, $link->linkable_type);
-        $this->assertSame($project->id, $link->linkable_id);
-    }
-
-    #[Test]
-    public function confirming_a_link_draft_to_a_position_resolves_via_org_scope(): void
-    {
-        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
-        $position = $this->makePosition($org, ['title' => 'Senior Engineer']);
-        $doc = $this->makeDocument();
-        $draft = $this->makeDraft($doc, 'link', [
-            'linkable_type' => 'position',
-            'linkable_name' => 'Senior Engineer',
-            'organization_name' => 'Acme',
-            'url' => 'https://example.com/job-description.pdf',
-            'type' => 'documentation',
-        ]);
-
-        $link = (new DraftConfirmer())->confirm($draft);
-
-        $this->assertSame(Position::class, $link->linkable_type);
-        $this->assertSame($position->id, $link->linkable_id);
-    }
-
-    #[Test]
-    public function confirming_a_link_draft_to_an_accomplishment_resolves_by_unique_title(): void
-    {
-        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
-        $project = $this->makeProject($org);
-        $accomplishment = $this->makeAccomplishment($project, ['title' => 'Shipped the migration']);
-        $doc = $this->makeDocument();
-        $draft = $this->makeDraft($doc, 'link', [
-            'linkable_type' => 'accomplishment',
-            'linkable_name' => 'Shipped the migration',
-            'url' => 'https://blog.example.com/migration-postmortem',
-            'type' => 'documentation',
-        ]);
-
-        $link = (new DraftConfirmer())->confirm($draft);
-
-        $this->assertSame(Accomplishment::class, $link->linkable_type);
-        $this->assertSame($accomplishment->id, $link->linkable_id);
-    }
-
-    #[Test]
-    public function link_draft_with_unknown_linkable_type_throws(): void
-    {
-        $doc = $this->makeDocument();
-        $draft = $this->makeDraft($doc, 'link', [
-            'linkable_type' => 'banana',
-            'linkable_name' => 'Acme',
-            'url' => 'https://example.com',
-        ]);
-
-        $this->expectException(DraftConfirmationException::class);
-        $this->expectExceptionMessage('banana');
-
-        (new DraftConfirmer())->confirm($draft);
-    }
-
-    #[Test]
-    public function link_draft_with_missing_url_throws(): void
-    {
-        Organization::create(['name' => 'Acme', 'type' => 'employer']);
-        $doc = $this->makeDocument();
-        $draft = $this->makeDraft($doc, 'link', [
-            'linkable_type' => 'organization',
-            'linkable_name' => 'Acme',
-        ]);
-
-        $this->expectException(DraftConfirmationException::class);
-        $this->expectExceptionMessage('url');
-
-        (new DraftConfirmer())->confirm($draft);
-    }
-
-    #[Test]
-    public function link_draft_with_unresolvable_parent_throws(): void
-    {
-        $doc = $this->makeDocument();
-        $draft = $this->makeDraft($doc, 'link', [
-            'linkable_type' => 'organization',
-            'linkable_name' => 'Nonexistent',
-            'url' => 'https://example.com',
-        ]);
-
-        $this->expectException(DraftConfirmationException::class);
-        $this->expectExceptionMessage('Nonexistent');
-
-        (new DraftConfirmer())->confirm($draft);
-    }
-
-    // ────────────────────────────────────────────────────────────
     // Nested tags on entity drafts
     // ────────────────────────────────────────────────────────────
 
@@ -708,7 +576,10 @@ class DraftConfirmerTest extends TestCase
         $draft = $this->makeDraft($doc, 'organization', [
             'name' => 'Acme',
             'type' => 'employer',
-            'tags' => ['B Corp', 'Remote First'],
+            'tags' => [
+                ['name' => 'B Corp', 'category' => 'concept'],
+                ['name' => 'Remote First', 'category' => 'methodology'],
+            ],
         ]);
 
         $org = (new DraftConfirmer())->confirm($draft);
@@ -731,7 +602,7 @@ class DraftConfirmerTest extends TestCase
             'name' => 'Tooling',
             'visibility' => 'internal',
             'contribution_level' => 'core',
-            'tags' => ['Python'],
+            'tags' => [['name' => 'Python', 'category' => 'language']],
         ]);
 
         $project = (new DraftConfirmer())->confirm($draft);
@@ -754,7 +625,7 @@ class DraftConfirmerTest extends TestCase
             'name' => 'Database work',
             'visibility' => 'internal',
             'contribution_level' => 'core',
-            'tags' => ['postgres'],
+            'tags' => [['name' => 'postgres', 'category' => 'tool']],
         ]);
 
         $project = (new DraftConfirmer())->confirm($draft);
@@ -773,7 +644,7 @@ class DraftConfirmerTest extends TestCase
             'name' => 'A project',
             'visibility' => 'internal',
             'contribution_level' => 'core',
-            'tags' => ['Kubernetes'],
+            'tags' => [['name' => 'Kubernetes', 'category' => 'tool']],
         ]);
 
         $project = (new DraftConfirmer())->confirm($draft);
@@ -781,7 +652,7 @@ class DraftConfirmerTest extends TestCase
         $this->assertSame(1, \App\Models\Tag::count());
         $newTag = \App\Models\Tag::first();
         $this->assertSame('Kubernetes', $newTag->name);
-        $this->assertNull($newTag->category); // No category on auto-create
+        $this->assertSame('tool', $newTag->category); // Category propagates on auto-create
         $this->assertSame($newTag->id, $project->tags->first()->id);
     }
 
@@ -798,7 +669,7 @@ class DraftConfirmerTest extends TestCase
             'name' => 'A project',
             'visibility' => 'internal',
             'contribution_level' => 'core',
-            'tags' => ['python'],
+            'tags' => [['name' => 'python', 'category' => 'language']],
         ]);
 
         $project = (new DraftConfirmer())->confirm($draft);
@@ -823,12 +694,79 @@ class DraftConfirmerTest extends TestCase
             'date' => '2023-01-01',
             'confidence' => 3,
             'prominence' => 3,
-            'tags' => ['Performance', 'Migration'],
+            'tags' => [
+                ['name' => 'Performance', 'category' => 'concept'],
+                ['name' => 'Migration', 'category' => 'concept'],
+            ],
         ]);
 
         $accomplishment = (new DraftConfirmer())->confirm($draft);
 
         $this->assertCount(2, $accomplishment->tags);
+    }
+
+    #[Test]
+    public function nested_tag_category_propagates_to_newly_created_tag(): void
+    {
+        // Confirmer-level coverage of the resolver's category param.
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'project', [
+            'organization_name' => 'Acme',
+            'name' => 'A project',
+            'visibility' => 'internal',
+            'contribution_level' => 'core',
+            'tags' => [['name' => 'Rust', 'category' => 'language']],
+        ]);
+
+        (new DraftConfirmer())->confirm($draft);
+
+        $newTag = \App\Models\Tag::where('name', 'Rust')->first();
+        $this->assertNotNull($newTag);
+        $this->assertSame('language', $newTag->category);
+    }
+
+    #[Test]
+    public function nested_tag_category_does_not_overwrite_existing_user_curation(): void
+    {
+        // User-curated category survives a re-extraction that disagrees.
+        $existing = $this->makeTag('Python', 'language');
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'project', [
+            'organization_name' => 'Acme',
+            'name' => 'A project',
+            'visibility' => 'internal',
+            'contribution_level' => 'core',
+            'tags' => [['name' => 'Python', 'category' => 'tool']],
+        ]);
+
+        (new DraftConfirmer())->confirm($draft);
+
+        $this->assertSame('language', $existing->fresh()->category);
+    }
+
+    #[Test]
+    public function nested_tag_with_invalid_category_creates_tag_with_null_category(): void
+    {
+        // AI emitted a category outside Tag::CATEGORIES. The tag is
+        // still created (the mention shouldn't be lost) but with
+        // category = null so review can prompt the user.
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'project', [
+            'organization_name' => 'Acme',
+            'name' => 'A project',
+            'visibility' => 'internal',
+            'contribution_level' => 'core',
+            'tags' => [['name' => 'GraphQL', 'category' => 'query-language']],
+        ]);
+
+        (new DraftConfirmer())->confirm($draft);
+
+        $newTag = \App\Models\Tag::where('name', 'GraphQL')->first();
+        $this->assertNotNull($newTag);
+        $this->assertNull($newTag->category);
     }
 
     // ────────────────────────────────────────────────────────────
@@ -974,184 +912,182 @@ class DraftConfirmerTest extends TestCase
     }
 
     // ────────────────────────────────────────────────────────────
-    // Review decisions: tag rejection and rename
+    // Nested links on entity drafts
     // ────────────────────────────────────────────────────────────
 
     #[Test]
-    public function rejected_tag_is_skipped_when_attaching_nested_tags(): void
+    public function confirming_an_organization_with_nested_links_attaches_them(): void
     {
         $doc = $this->makeDocument();
-        $doc->update(['review_decisions' => ['rejected_tags' => ['Postgres']]]);
-        Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $draft = $this->makeDraft($doc, 'organization', [
+            'name' => 'Acme',
+            'type' => 'employer',
+            'links' => [
+                ['url' => 'https://acme.example.com', 'type' => 'website'],
+                ['url' => 'https://acme.example.com/careers', 'type' => 'careers'],
+            ],
+        ]);
+
+        $org = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertCount(2, $org->links);
+        $urls = $org->links->pluck('url')->sort()->values()->all();
+        $this->assertSame([
+            'https://acme.example.com',
+            'https://acme.example.com/careers',
+        ], $urls);
+        // Polymorphic columns set automatically via morphMany.
+        $this->assertSame(Organization::class, $org->links->first()->linkable_type);
+    }
+
+    #[Test]
+    public function confirming_a_project_with_nested_links_attaches_them(): void
+    {
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $doc = $this->makeDocument();
         $draft = $this->makeDraft($doc, 'project', [
             'organization_name' => 'Acme',
-            'name' => 'A project',
+            'name' => 'Migration',
             'visibility' => 'internal',
             'contribution_level' => 'core',
-            'tags' => ['Postgres', 'Python'],
+            'links' => [
+                [
+                    'url' => 'https://github.com/acme/migration',
+                    'type' => 'github',
+                    'title' => 'Source repo',
+                    'description' => 'Repo with the migration code',
+                ],
+            ],
         ]);
 
         $project = (new DraftConfirmer())->confirm($draft);
 
-        // Only Python should attach; Postgres was rejected.
-        $tagNames = $project->tags->pluck('name')->all();
-        $this->assertSame(['Python'], $tagNames);
+        $this->assertCount(1, $project->links);
+        $link = $project->links->first();
+        $this->assertSame(Project::class, $link->linkable_type);
+        $this->assertSame($project->id, $link->linkable_id);
+        $this->assertSame('https://github.com/acme/migration', $link->url);
+        $this->assertSame('github', $link->type);
+        $this->assertSame('Source repo', $link->title);
+        $this->assertSame('Repo with the migration code', $link->description);
     }
 
     #[Test]
-    public function tag_rejection_match_is_case_insensitive(): void
+    public function confirming_a_position_with_nested_links_attaches_them(): void
     {
-        // AI emitted "Postgres"; user rejected "postgres". They're the
-        // same name and should be treated as the same decision.
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
         $doc = $this->makeDocument();
-        $doc->update(['review_decisions' => ['rejected_tags' => ['postgres']]]);
-        Organization::create(['name' => 'Acme', 'type' => 'employer']);
-        $draft = $this->makeDraft($doc, 'project', [
-            'organization_name' => 'Acme',
-            'name' => 'A project',
-            'visibility' => 'internal',
-            'contribution_level' => 'core',
-            'tags' => ['Postgres'],
-        ]);
-
-        $project = (new DraftConfirmer())->confirm($draft);
-
-        $this->assertCount(0, $project->tags);
-    }
-
-    #[Test]
-    public function renamed_tag_is_replaced_before_resolution(): void
-    {
-        // AI emitted "Postgres 14"; user renamed to "Postgres". The
-        // confirmer should resolve "Postgres" (creating it new since
-        // no existing match) rather than "Postgres 14".
-        $doc = $this->makeDocument();
-        $doc->update(['review_decisions' => ['renamed_tags' => ['Postgres 14' => 'Postgres']]]);
-        Organization::create(['name' => 'Acme', 'type' => 'employer']);
-        $draft = $this->makeDraft($doc, 'project', [
-            'organization_name' => 'Acme',
-            'name' => 'A project',
-            'visibility' => 'internal',
-            'contribution_level' => 'core',
-            'tags' => ['Postgres 14'],
-        ]);
-
-        $project = (new DraftConfirmer())->confirm($draft);
-
-        $this->assertCount(1, $project->tags);
-        $this->assertSame('Postgres', $project->tags->first()->name);
-        // Crucially, no "Postgres 14" tag was created.
-        $this->assertSame(0, \App\Models\Tag::where('name', 'Postgres 14')->count());
-    }
-
-    #[Test]
-    public function rename_resolution_still_goes_through_alias_lookup(): void
-    {
-        // The rename redirects "Postgres 14" → "Postgres", which then
-        // happens to be an alias of "PostgreSQL". The final resolution
-        // should land on PostgreSQL.
-        $pgTag = \App\Models\Tag::create(['name' => 'PostgreSQL', 'category' => 'tool']);
-        $pgTag->aliases()->create(['alias' => 'Postgres']);
-        $doc = $this->makeDocument();
-        $doc->update(['review_decisions' => ['renamed_tags' => ['Postgres 14' => 'Postgres']]]);
-        Organization::create(['name' => 'Acme', 'type' => 'employer']);
-        $draft = $this->makeDraft($doc, 'project', [
-            'organization_name' => 'Acme',
-            'name' => 'A project',
-            'visibility' => 'internal',
-            'contribution_level' => 'core',
-            'tags' => ['Postgres 14'],
-        ]);
-
-        $project = (new DraftConfirmer())->confirm($draft);
-
-        $this->assertSame($pgTag->id, $project->tags->first()->id);
-    }
-
-    // ────────────────────────────────────────────────────────────
-    // Review decisions: collaborator rejection and rename
-    // ────────────────────────────────────────────────────────────
-
-    #[Test]
-    public function rejected_collaborator_is_skipped(): void
-    {
-        $doc = $this->makeDocument();
-        $doc->update(['review_decisions' => ['rejected_collaborators' => ['Anonymous Mentor']]]);
-        Organization::create(['name' => 'Acme', 'type' => 'employer']);
         $draft = $this->makeDraft($doc, 'position', $this->positionPayload([
-            'collaborators' => [
-                ['name' => 'Anonymous Mentor', 'role' => 'Mentor'],
-                ['name' => 'Sarah Chen', 'role' => 'Manager'],
+            'links' => [
+                ['url' => 'https://example.com/jd.pdf', 'type' => 'documentation'],
             ],
         ]));
 
         $position = (new DraftConfirmer())->confirm($draft);
 
-        $names = $position->collaborators->pluck('name')->all();
-        $this->assertSame(['Sarah Chen'], $names);
+        $this->assertCount(1, $position->links);
+        $this->assertSame(Position::class, $position->links->first()->linkable_type);
     }
 
     #[Test]
-    public function renamed_collaborator_resolves_to_existing_person(): void
+    public function confirming_an_accomplishment_with_nested_links_attaches_them(): void
     {
-        // The user knows the canonical record is "Sarah K Chen" not
-        // "Sarah Chen" — the rename redirects resolution to the
-        // existing record.
-        $canonical = \App\Models\Person::create(['name' => 'Sarah K Chen']);
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $project = $this->makeProject($org);
         $doc = $this->makeDocument();
-        $doc->update(['review_decisions' => ['renamed_collaborators' => ['Sarah Chen' => 'Sarah K Chen']]]);
-        Organization::create(['name' => 'Acme', 'type' => 'employer']);
-        $draft = $this->makeDraft($doc, 'position', $this->positionPayload([
-            'collaborators' => [
-                ['name' => 'Sarah Chen', 'role' => 'Manager'],
+        $draft = $this->makeDraft($doc, 'accomplishment', [
+            'project_name' => $project->name,
+            'organization_name' => 'Acme',
+            'title' => 'Shipped it',
+            'description' => 'Description',
+            'date' => '2023-01-01',
+            'confidence' => 3,
+            'prominence' => 3,
+            'links' => [
+                [
+                    'url' => 'https://conference.example.com/talk',
+                    'type' => 'talk',
+                    'is_personal_appearance' => true,
+                ],
             ],
-        ]));
+        ]);
 
-        $position = (new DraftConfirmer())->confirm($draft);
+        $accomplishment = (new DraftConfirmer())->confirm($draft);
 
-        $this->assertSame(1, \App\Models\Person::count());
-        $this->assertSame($canonical->id, $position->collaborators->first()->id);
+        $this->assertCount(1, $accomplishment->links);
+        $link = $accomplishment->links->first();
+        $this->assertSame(Accomplishment::class, $link->linkable_type);
+        $this->assertSame('talk', $link->type);
+        $this->assertTrue($link->is_personal_appearance);
     }
 
     #[Test]
-    public function collaborator_rejection_is_case_insensitive(): void
+    public function nested_link_with_invalid_type_defaults_to_other(): void
     {
+        // AI emitted a type outside Link::TYPES. The link is still
+        // created (the URL is worth preserving) with type = "other"
+        // since the column is non-nullable.
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
         $doc = $this->makeDocument();
-        $doc->update(['review_decisions' => ['rejected_collaborators' => ['sarah chen']]]);
-        Organization::create(['name' => 'Acme', 'type' => 'employer']);
-        $draft = $this->makeDraft($doc, 'position', $this->positionPayload([
-            'collaborators' => [
-                ['name' => 'Sarah Chen', 'role' => 'Manager'],
-            ],
-        ]));
-
-        $position = (new DraftConfirmer())->confirm($draft);
-
-        $this->assertCount(0, $position->collaborators);
-    }
-
-    #[Test]
-    public function review_decisions_with_no_relevant_entries_are_no_ops(): void
-    {
-        // Even with review_decisions set, names not in the rejection
-        // or rename lists should resolve normally.
-        $doc = $this->makeDocument();
-        $doc->update(['review_decisions' => [
-            'rejected_tags' => ['Something Unrelated'],
-            'renamed_tags' => ['Other Thing' => 'Different Thing'],
-        ]]);
-        Organization::create(['name' => 'Acme', 'type' => 'employer']);
         $draft = $this->makeDraft($doc, 'project', [
             'organization_name' => 'Acme',
-            'name' => 'A project',
+            'name' => 'Migration',
             'visibility' => 'internal',
             'contribution_level' => 'core',
-            'tags' => ['Python'],
+            'links' => [
+                ['url' => 'https://example.com/something', 'type' => 'whatever'],
+            ],
         ]);
 
         $project = (new DraftConfirmer())->confirm($draft);
 
-        $this->assertCount(1, $project->tags);
-        $this->assertSame('Python', $project->tags->first()->name);
+        $this->assertSame('other', $project->links->first()->type);
+    }
+
+    #[Test]
+    public function nested_link_without_type_defaults_to_other(): void
+    {
+        // AI omitted type entirely. Same fallback — the column is
+        // non-nullable, so we default to "other".
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'project', [
+            'organization_name' => 'Acme',
+            'name' => 'Migration',
+            'visibility' => 'internal',
+            'contribution_level' => 'core',
+            'links' => [
+                ['url' => 'https://example.com/something'],
+            ],
+        ]);
+
+        $project = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertSame('other', $project->links->first()->type);
+    }
+
+    #[Test]
+    public function nested_link_without_url_is_skipped(): void
+    {
+        // Defensive: an entry without a usable url is skipped rather
+        // than failing the entire confirmation.
+        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
+        $doc = $this->makeDocument();
+        $draft = $this->makeDraft($doc, 'project', [
+            'organization_name' => 'Acme',
+            'name' => 'Migration',
+            'visibility' => 'internal',
+            'contribution_level' => 'core',
+            'links' => [
+                ['type' => 'website'],
+                ['url' => '   '],
+                ['url' => 'https://valid.example.com', 'type' => 'website'],
+            ],
+        ]);
+
+        $project = (new DraftConfirmer())->confirm($draft);
+
+        $this->assertCount(1, $project->links);
+        $this->assertSame('https://valid.example.com', $project->links->first()->url);
     }
 }

@@ -124,6 +124,88 @@ class ClaudeExtractionProviderTest extends TestCase
     }
 
     #[Test]
+    public function extract_parses_entity_drafts_with_nested_tags_and_collaborators(): void
+    {
+        // Per the milestone 4.6 architecture, the AI emits tags and
+        // people only as nested arrays on entity drafts. Top-level
+        // `tag` and `person` records are derived by business logic
+        // downstream, not produced by the AI. This test asserts the
+        // nested shapes survive parseDrafts() unchanged.
+        $extractedJson = json_encode([
+            ['type' => 'project', 'data' => [
+                'organization_name' => 'Acme',
+                'name' => 'User DB Migration',
+                'visibility' => 'internal',
+                'contribution_level' => 'core',
+                'tags' => [
+                    ['name' => 'Postgres', 'category' => 'tool'],
+                    ['name' => 'Python', 'category' => 'language'],
+                ],
+                'collaborators' => [
+                    ['name' => 'Sarah Chen', 'role' => 'Manager'],
+                ],
+            ]],
+        ]);
+
+        Http::fake([
+            'api.anthropic.com/v1/messages' => Http::response([
+                'content' => [['type' => 'text', 'text' => $extractedJson]],
+                'usage' => ['input_tokens' => 500, 'output_tokens' => 100],
+            ], 200),
+        ]);
+
+        $result = $this->makeProvider()->extract($this->makeDocument());
+
+        $this->assertCount(1, $result->drafts);
+        $this->assertSame('project', $result->drafts[0]->type);
+
+        $tags = $result->drafts[0]->data['tags'];
+        $this->assertCount(2, $tags);
+        $this->assertSame('Postgres', $tags[0]['name']);
+        $this->assertSame('tool', $tags[0]['category']);
+        $this->assertSame('Python', $tags[1]['name']);
+        $this->assertSame('language', $tags[1]['category']);
+
+        $collaborators = $result->drafts[0]->data['collaborators'];
+        $this->assertCount(1, $collaborators);
+        $this->assertSame('Sarah Chen', $collaborators[0]['name']);
+        $this->assertSame('Manager', $collaborators[0]['role']);
+    }
+
+    #[Test]
+    public function extract_parses_top_level_link_records(): void
+    {
+        // Links remain top-level — unlike tags and people, they aren't
+        // derivable from entity drafts and need an explicit parent
+        // reference (linkable_type + linkable_name) to be useful.
+        $extractedJson = json_encode([
+            ['type' => 'link', 'data' => [
+                'url' => 'https://github.com/example/repo',
+                'linkable_type' => 'project',
+                'linkable_name' => 'User DB Migration',
+                'organization_name' => 'Acme',
+                'type' => 'github',
+                'title' => 'Source repository',
+            ]],
+        ]);
+
+        Http::fake([
+            'api.anthropic.com/v1/messages' => Http::response([
+                'content' => [['type' => 'text', 'text' => $extractedJson]],
+                'usage' => ['input_tokens' => 500, 'output_tokens' => 100],
+            ], 200),
+        ]);
+
+        $result = $this->makeProvider()->extract($this->makeDocument());
+
+        $this->assertCount(1, $result->drafts);
+        $this->assertSame('link', $result->drafts[0]->type);
+        $this->assertSame('https://github.com/example/repo', $result->drafts[0]->data['url']);
+        $this->assertSame('project', $result->drafts[0]->data['linkable_type']);
+        $this->assertSame('User DB Migration', $result->drafts[0]->data['linkable_name']);
+    }
+
+    #[Test]
     public function extract_throws_on_unparseable_json(): void
     {
         Http::fake([

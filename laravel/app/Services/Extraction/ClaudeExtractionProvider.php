@@ -4,7 +4,9 @@ namespace App\Services\Extraction;
 
 use App\Enums\OrganizationStatus;
 use App\Enums\OrganizationType;
+use App\Models\Link;
 use App\Models\SourceDocument;
+use App\Models\Tag;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
@@ -330,19 +332,26 @@ Return a JSON array of records. Each record has a "type" and a "data" object. Po
 
 For each type, the "data" object uses these fields. Omit fields you cannot determine from the document. Do not invent values.
 
-organization data: name (required), type ({{organization_types}} — use "prospect" only for companies the user is researching or applying to, not employment history), website, tagline, description, headquarters, founded_year, size_estimate, status ({{organization_statuses}} or omit)
+organization data: name (required), type ({{organization_types}} — use "prospect" only for companies the user is researching or applying to, not employment history), website, tagline, description, headquarters, founded_year, size_estimate, status ({{organization_statuses}} or omit), tags (array, see below), links (array, see below)
 
-position data: organization_name (required, references an organization in the same response or an existing one), title (required), employment_type ("full_time" | "part_time" | "contract" | "freelance" | "internship" | "advisor" | "volunteer" | "founder"), location_arrangement ("remote" | "hybrid" | "on_site"), location_text, start_date (YYYY-MM-DD), end_date (YYYY-MM-DD or null if current), team_name, team_size_immediate, team_size_extended, mandate, reason_for_leaving ("still_employed" | "laid_off" | "quit_for_opportunity" | "quit_for_personal" | "contract_ended" | "company_wound_down" | "terminated" | "other")
+position data: organization_name (required, references an organization in the same response or an existing one), title (required), employment_type ("full_time" | "part_time" | "contract" | "freelance" | "internship" | "advisor" | "volunteer" | "founder"), location_arrangement ("remote" | "hybrid" | "on_site"), location_text, start_date (YYYY-MM-DD), end_date (YYYY-MM-DD or null if current), team_name, team_size_immediate, team_size_extended, mandate, reason_for_leaving ("still_employed" | "laid_off" | "quit_for_opportunity" | "quit_for_personal" | "contract_ended" | "company_wound_down" | "terminated" | "other"), tags (array, see below), collaborators (array, see below), links (array, see below)
 
-project data: organization_name (required), position_title (optional, references a position at that org), parent_project_name (optional), name (required), public_name, description, problem, constraints, approach, outcome, rationale, date_precision ("day" | "month" | "quarter" | "year"), start_date (YYYY-MM-DD), end_date (YYYY-MM-DD or null), visibility ("public" | "open_source" | "internal" | "confidential"), status ("live" | "archived" | "killed" | "prototype" | "ongoing"), contribution_level ("lead" | "core" | "contributor" | "occasional" | "reviewer"), contribution_type, team_size
+project data: organization_name (required), position_title (optional, references a position at that org), parent_project_name (optional), name (required), public_name, description, problem, constraints, approach, outcome, rationale, date_precision ("day" | "month" | "quarter" | "year"), start_date (YYYY-MM-DD), end_date (YYYY-MM-DD or null), visibility ("public" | "open_source" | "internal" | "confidential"), status ("live" | "archived" | "killed" | "prototype" | "ongoing"), contribution_level ("lead" | "core" | "contributor" | "occasional" | "reviewer"), contribution_type, team_size, tags (array, see below), collaborators (array, see below), links (array, see below)
 
-accomplishment data: organization_name (required), project_name (optional — sets the project this accomplishment belongs to), position_title (optional — sets the position this accomplishment belongs to when no project applies), title (required), description (required), impact_metric, impact_value, impact_unit, confidence (1-5 integer), prominence (1-5 integer), date (YYYY-MM-DD) OR period_start (YYYY-MM-DD) and optional period_end (YYYY-MM-DD)
+accomplishment data: organization_name (required), project_name (optional — sets the project this accomplishment belongs to), position_title (optional — sets the position this accomplishment belongs to when no project applies), title (required), description (required), impact_metric, impact_value, impact_unit, confidence (1-5 integer), prominence (1-5 integer), date (YYYY-MM-DD) OR period_start (YYYY-MM-DD) and optional period_end (YYYY-MM-DD), tags (array, see below), collaborators (array, see below), links (array, see below)
+
+Nested `tags` shape: an array of objects, each `{"name": "Postgres", "category": "tool"}`. The name is the tag as the document phrases it (preserve casing). The category must be one of {{tag_categories}} — pick the best fit based on how the document uses the tag. Examples: "Python" → "language", "React" → "framework", "Postgres" → "tool", "REST" → "protocol", "fintech" → "domain", "agile" → "methodology", "AWS" → "vendor", "GPU" → "hardware", "machine learning" → "concept".
+
+Nested `collaborators` shape: an array of objects, each `{"name": "Sarah Chen", "role": "Manager"}`. The role is the person's role with respect to this specific entity — "Manager" and "Engineering Director" on a position, "Reviewer" or "Co-author" on an accomplishment. Omit the role field if the document doesn't specify one.
+
+Nested `links` shape: an array of objects, each `{"url": "https://...", "type": "github", "title": "...", "description": "...", "is_personal_appearance": false, "date": "YYYY-MM-DD"}`. The url is required; all other fields are optional. The type classifies the link itself (not the parent entity) and must be one of {{link_types}}. Use "is_personal_appearance" = true when the URL features the user themselves (a talk recording, podcast appearance, media interview); false for general repos, docs, or company links. Examples: a GitHub repo URL → "github", the user's personal site → "website", a blog post the user wrote → "blog_post", a conference talk video the user gave → "talk" with is_personal_appearance true.
 
 Rules:
 - Each accomplishment must include organization_name AND either project_name (preferred) or position_title — never both project_name and position_title, never neither. The organization_name is always required; it provides the context the parent project or position belongs to.
 - Each accomplishment must have either a single date OR a period_start (with optional period_end), never both, never neither.
 - For confidence and prominence, use 3 if you cannot determine a meaningful value. Use 4-5 only when the source explicitly indicates strong evidence or high importance. Use 1-2 only when the source explicitly indicates uncertainty or low importance.
 - For date_precision on projects, choose the precision the source supports. If the source says "shipped in Q2 2023," use "quarter". If "in 2023," use "year". If a specific month, use "month". If a specific day, use "day".
+- Attach tags, collaborators, and links to the most specific entity that justifies them. If a tag describes a project's technology stack, nest it under that project, not the broader position. If a link is the source code for a specific project, nest it under that project. If a link is the company's careers page, nest it under the organization.
 - If the document contains no extractable career records (it's a recipe, an unrelated email, etc.), return an empty array.
 
 Return only the JSON array. No preamble, no commentary, no code fences.
@@ -351,6 +360,8 @@ PROMPT;
         return strtr($template, [
             '{{organization_types}}' => OrganizationType::promptEnumString(),
             '{{organization_statuses}}' => OrganizationStatus::promptEnumString(),
+            '{{link_types}}' => '"' . implode('" | "', Link::TYPES) . '"',
+            '{{tag_categories}}' => '"' . implode('" | "', Tag::CATEGORIES) . '"',
         ]);
     }
 }
