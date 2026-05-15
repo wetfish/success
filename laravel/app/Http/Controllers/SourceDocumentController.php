@@ -8,6 +8,7 @@ use App\Models\SourceDocument;
 use App\Services\AiUsageTracker;
 use App\Services\Extraction\ExtractionException;
 use App\Services\Extraction\ExtractionProvider;
+use App\Services\Extraction\ReviewRecordExtractor;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -208,6 +209,7 @@ class SourceDocumentController extends Controller
         SourceDocument $sourceDocument,
         ExtractionProvider $provider,
         AiUsageTracker $tracker,
+        ReviewRecordExtractor $reviewExtractor,
     ): RedirectResponse {
         if ($sourceDocument->isCompleted()) {
             return redirect()
@@ -249,9 +251,15 @@ class SourceDocumentController extends Controller
             ]);
         }
 
+        // After the entity drafts land, walk their nested
+        // tags/collaborators/links and produce flat top-level review
+        // records for each unique entry. See ReviewRecordExtractor for
+        // the deduplication and pre-compute-match rules.
+        $reviewCount = $reviewExtractor->extract($sourceDocument);
+
         return redirect()
             ->route('source-documents.show', $sourceDocument)
-            ->with('status', "Extracted {$result->drafts->count()} draft records.");
+            ->with('status', "Extracted {$result->drafts->count()} draft records and {$reviewCount} review records.");
     }
 
     public function show(SourceDocument $sourceDocument): View

@@ -340,13 +340,23 @@ class DraftReviewController extends Controller
     }
 
     /**
-     * All drafts for a source document — pending, rejected, confirmed,
-     * merged — ordered by record type (orgs first, accomplishments
-     * last), then by id (creation order) within each type.
+     * All drafts for a source document, type-ordered (organization
+     * first, then position, project, accomplishment), then by id
+     * (creation order) within each type.
+     *
+     * Scoped to entity-type drafts only — tag/person/link review
+     * records produced by ReviewRecordExtractor live in the same
+     * extracted_records table but don't belong in this queue. They
+     * have a different action set (confirm/reject/merge with existing/
+     * add as alias) and the chunk-4 review UI will provide a separate
+     * surface for them. Including them here would make the queue's
+     * Confirm action fail with "Unknown record type" since
+     * DraftConfirmer has no dispatch arm for tag or link.
      */
     private function allDraftsQuery(SourceDocument $sourceDocument)
     {
         return $sourceDocument->extractedRecords()
+            ->whereIn('record_type', array_keys(self::RECORD_TYPE_ORDER))
             ->orderByRaw($this->typeOrderExpression())
             ->orderBy('id');
     }
@@ -354,11 +364,13 @@ class DraftReviewController extends Controller
     /**
      * Pending drafts for a source document, type-ordered. Used by
      * index() to pick the first pending draft to navigate to.
+     * Same entity-only scoping as allDraftsQuery — see its docblock.
      */
     private function pendingDraftsQuery(SourceDocument $sourceDocument)
     {
         return $sourceDocument->extractedRecords()
             ->where('status', 'pending')
+            ->whereIn('record_type', array_keys(self::RECORD_TYPE_ORDER))
             ->orderByRaw($this->typeOrderExpression())
             ->orderBy('id');
     }

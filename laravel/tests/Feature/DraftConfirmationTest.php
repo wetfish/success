@@ -139,4 +139,34 @@ class DraftConfirmationTest extends TestCase
         $orgDraft->refresh();
         $this->assertSame('confirmed', $orgDraft->status);
     }
+
+    #[Test]
+    public function review_queue_excludes_tag_person_and_link_review_records(): void
+    {
+        // The existing review queue is for entity drafts only. The
+        // tag/person/link review records produced by
+        // ReviewRecordExtractor live in the same extracted_records
+        // table but have a different action set (confirm/merge/alias
+        // against the catalog) and will get a separate review UI.
+        // Until then, including them in this queue would make the
+        // user navigate to records the existing Confirm action can't
+        // dispatch — DraftConfirmer has no arm for 'tag' or 'link'.
+        $doc = $this->makeDocument();
+
+        $entityDraft = $this->makeDraft($doc, 'organization', [
+            'name' => 'Acme',
+            'type' => 'employer',
+        ]);
+        $this->makeDraft($doc, 'tag', ['extracted_name' => 'Postgres', 'category' => 'tool']);
+        $this->makeDraft($doc, 'person', ['extracted_name' => 'Sarah Chen']);
+        $this->makeDraft($doc, 'link', ['url' => 'https://example.com', 'type' => 'website']);
+
+        // Index redirects to the first pending draft in the queue —
+        // should be the entity draft, not any of the review records.
+        $this->get(route('source-documents.review.index', $doc))
+            ->assertRedirect(route('source-documents.review.show', [
+                'sourceDocument' => $doc,
+                'draft' => $entityDraft->id,
+            ]));
+    }
 }

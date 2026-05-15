@@ -178,6 +178,66 @@ class SourceDocumentSubmissionTest extends TestCase
     }
 
     #[Test]
+    public function extract_also_creates_review_records_from_nested_entity_data(): void
+    {
+        // Feature-level confirmation that the controller wires
+        // ReviewRecordExtractor into the extract flow. The unit tests
+        // cover dedup, matching, and the rest in detail; this test
+        // verifies the integration — entity drafts AND review records
+        // both end up persisted after a POST to the extract endpoint.
+        //
+        // Pre-create one tag in the catalog so we can verify the
+        // match_record_id pre-compute path fires through the
+        // controller. Mirror tag emission name+category exactly so
+        // the resolver finds it.
+        $existingTag = \App\Models\Tag::create(['name' => 'Python', 'category' => 'language']);
+
+        $this->bindFake(fn ($f) => $f
+            ->returns([
+                new DraftRecord(type: 'organization', data: ['name' => 'Acme']),
+                new DraftRecord(type: 'project', data: [
+                    'organization_name' => 'Acme',
+                    'name' => 'Migration',
+                    'tags' => [
+                        ['name' => 'Python', 'category' => 'language'],     // matches existing
+                        ['name' => 'Kubernetes', 'category' => 'tool'],     // new
+                    ],
+                    'collaborators' => [
+                        ['name' => 'Sarah Chen', 'role' => 'Manager'],
+                    ],
+                    'links' => [
+                        ['url' => 'https://github.com/acme/migration', 'type' => 'github'],
+                    ],
+                ]),
+            ])
+        );
+
+        $document = SourceDocument::create([
+            'body' => 'My notes', 'kind' => 'other', 'file_type' => 'text',
+        ]);
+
+        $this->post(route('source-documents.extract', $document));
+
+        // 2 entity drafts + 2 tag review records + 1 person review record
+        // + 1 link review record = 6 total.
+        $this->assertSame(6, ExtractedRecord::where('source_document_id', $document->id)->count());
+
+        $pythonReview = ExtractedRecord::where('source_document_id', $document->id)
+            ->where('record_type', 'tag')
+            ->where('payload->extracted_name', 'Python')
+            ->first();
+        $this->assertNotNull($pythonReview);
+        $this->assertSame($existingTag->id, $pythonReview->match_record_id);
+
+        $kubernetesReview = ExtractedRecord::where('source_document_id', $document->id)
+            ->where('record_type', 'tag')
+            ->where('payload->extracted_name', 'Kubernetes')
+            ->first();
+        $this->assertNotNull($kubernetesReview);
+        $this->assertNull($kubernetesReview->match_record_id);
+    }
+
+    #[Test]
     public function extract_soft_fails_and_redirects_to_show_when_extraction_errors(): void
     {
         $this->bindFake(fn ($f) => $f->throws(new ExtractionException('Simulated')));
