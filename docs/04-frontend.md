@@ -100,7 +100,42 @@ For the review queue specifically:
 
 The schema lives in `App\Services\Drafts\DraftFieldSchema` (see [services doc](02-services-and-commands.md#appservicesdraftsdraftfieldschema)). Field types map to standard HTML inputs: `text` → text input, `textarea` → textarea, `select` → select with options, `date` → date input, `number` → number input.
 
+Nested array fields (`tag_list`, `collaborator_list`, `link_list`) render read-only on the entity-draft review page — they're surfaced for visibility but not editable in that surface. Edits happen via the wizard's earlier steps (tag review for tags, future person review for people) or via the catalog edit pages.
+
 Required fields show a pink asterisk. Optional fields render only if the payload has a value (so the form doesn't overwhelm the user with every possible optional field). Optional help text appears below the input where the schema provides it.
+
+## Tag review page
+
+The wizard's step 1: dedicated page at `/source-documents/{doc}/review/tags` for accepting, rejecting, or aliasing extracted tag names. Lives at `resources/views/tag-reviews/show.blade.php` plus `_record.blade.php` for the per-record partial.
+
+**Layout.** Header reuses the entity-draft page's progress bar pattern (gradient pink bar + "X of Y reviewed" counter). Records group by AI-emitted category (with an `Uncategorized` bucket for off-enum categories), one card per record. Three action buttons per card (Accept / Alias to… / Reject) stay visible at all times so users can re-decide. Card border tints by status: pink for approved (confirmed or merged), muted grey for rejected, default for pending. A Next button at the bottom is disabled until pending count hits zero.
+
+**Mentions context.** Each card shows up to three entity drafts that reference the tag, with "+N more" for additional mentions. The controller builds a `$mentions` map by walking pending entity drafts' nested `tags` arrays case-insensitively. Helps the user judge what's worth keeping.
+
+**JavaScript split into two files.**
+
+- `resources/js/tag-review.js` — auto-mounts on `[data-tag-review]`, intercepts action button clicks, POSTs JSON to the controller endpoints, updates the page's DOM state on response. Tracks pending count and updates the progress bar fill in place. Manages a single shared alias picker that gets repositioned per record on Alias clicks.
+- `resources/js/alias-picker.js` — library module exposing `createAliasPicker({container, searchUrl, onSelect, onCancel})`. Reuses the existing `tags.search` endpoint plus `tag-picker-*` CSS classes. Single-select, callback-based, no chips or hidden form inputs.
+
+**Data attribute contract.** The Blade emits a stable set of `data-*` attributes the JS reads:
+
+| Element | Attribute | Purpose |
+|---|---|---|
+| `[data-tag-review]` (root) | `data-search-url` | URL for the alias picker's catalog search |
+| | contains `[data-tag-review-next]` | Next button — JS toggles `is-disabled` class |
+| | contains `[data-tag-review-reviewed-count]` | Text node updated on each decision |
+| | contains `[data-tag-review-progressbar]` / `[data-tag-review-progressbar-fill]` | Width and aria-valuenow updated on each decision |
+| `[data-tag-review-record]` (per card) | `data-accept-url` / `data-reject-url` / `data-alias-url` | Endpoint URLs |
+| | `data-status` | Initial status; JS updates on transition |
+| | contains `[data-action="accept|alias|reject"]` buttons | Inside `[data-tag-review-actions]` |
+| | contains three `[data-tag-review-status-badge][data-status-badge="..."]` pills | All rendered upfront; JS toggles `hidden` |
+| | contains `[data-tag-review-accept-target]` / `[data-tag-review-merge-target]` | Inside the matching pills; JS populates with catalog tag name |
+| | contains `[data-tag-review-alias-slot]` | Empty container the alias picker mounts into |
+| | contains `[data-tag-review-error hidden]` | Slot for inline error messages |
+
+**JSON-only action endpoints.** Accept / Reject / Alias all return `{ok: true}` on success (Accept also includes `catalog_tag_name`) or `{error: '...'}` with a 4xx/5xx status on failure. The JS client checks `response.ok && parsed.ok` and surfaces the `error` text inline near the record on failure. No partial HTML, no 204s — uniform contract.
+
+**Status-pill styling.** `.status-badge--review-approved` (pink border + text, transparent fill) for confirmed and merged; existing `.status-badge-rejected` (muted slate) for rejected. The two approved states share a color but render different text: "Accepted as X" vs. "Merged into Y." Card borders use `.tag-review-card`, `.tag-review-card--approved`, and `.tag-review-card--rejected` classes.
 
 ## Merge editor pattern
 

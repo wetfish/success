@@ -12,6 +12,8 @@ use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\SourceDocumentController;
 use App\Http\Controllers\TagAliasController;
 use App\Http\Controllers\TagController;
+use App\Http\Controllers\TagReviewController;
+use App\Http\Middleware\RequireTagReviewComplete;
 use Illuminate\Support\Facades\Route;
 
 /* The home page is the AI extraction input. Users land here to paste
@@ -87,29 +89,57 @@ Route::delete('source-documents/{sourceDocument}', [SourceDocumentController::cl
  *
  * Drafts are reviewed type-ordered: organizations → positions → projects →
  * accomplishments. */
+/* Tag review wizard step. Pending tag review records (record_type='tag',
+ * status='pending') get surfaced here for the user to accept / reject /
+ * alias before entity-draft confirmation. Matched-at-derivation tag
+ * records are auto-confirmed and don't appear in this UI — see
+ * ReviewRecordExtractor::createTagReviewRecords.
+ *
+ * The accept/reject/alias endpoints return JSON (success: {ok: true},
+ * failure: {error: '...'} with a 4xx/5xx status). The JS client treats
+ * the response uniformly: parse JSON, branch on presence of error. No
+ * partial HTML, no 204s — consistent contract for the JS to read. */
+Route::get('source-documents/{sourceDocument}/review/tags', [TagReviewController::class, 'show'])
+    ->name('source-documents.review.tags.show');
+
+Route::post('source-documents/{sourceDocument}/review/tags/{record}/accept', [TagReviewController::class, 'accept'])
+    ->name('source-documents.review.tags.accept');
+
+Route::post('source-documents/{sourceDocument}/review/tags/{record}/reject', [TagReviewController::class, 'reject'])
+    ->name('source-documents.review.tags.reject');
+
+Route::post('source-documents/{sourceDocument}/review/tags/{record}/alias', [TagReviewController::class, 'alias'])
+    ->name('source-documents.review.tags.alias');
+
 Route::get('source-documents/{sourceDocument}/review', [DraftReviewController::class, 'index'])
     ->name('source-documents.review.index');
 
-Route::get('source-documents/{sourceDocument}/review/{draft}', [DraftReviewController::class, 'show'])
-    ->name('source-documents.review.show');
+/* Entity-draft review routes are gated by RequireTagReviewComplete:
+ * if the source document has pending tag review records, hitting any
+ * of these URLs redirects to the tag review page. This enforces the
+ * wizard sequencing — users can't deep-link past step 1. */
+Route::middleware(RequireTagReviewComplete::class)->group(function () {
+    Route::get('source-documents/{sourceDocument}/review/{draft}', [DraftReviewController::class, 'show'])
+        ->name('source-documents.review.show');
 
-Route::post('source-documents/{sourceDocument}/review/{draft}/reject', [DraftReviewController::class, 'reject'])
-    ->name('source-documents.review.reject');
+    Route::post('source-documents/{sourceDocument}/review/{draft}/reject', [DraftReviewController::class, 'reject'])
+        ->name('source-documents.review.reject');
 
-Route::post('source-documents/{sourceDocument}/review/{draft}/restore', [DraftReviewController::class, 'restore'])
-    ->name('source-documents.review.restore');
+    Route::post('source-documents/{sourceDocument}/review/{draft}/restore', [DraftReviewController::class, 'restore'])
+        ->name('source-documents.review.restore');
 
-Route::post('source-documents/{sourceDocument}/review/{draft}/confirm', [DraftReviewController::class, 'confirm'])
-    ->name('source-documents.review.confirm');
+    Route::post('source-documents/{sourceDocument}/review/{draft}/confirm', [DraftReviewController::class, 'confirm'])
+        ->name('source-documents.review.confirm');
 
-Route::get('source-documents/{sourceDocument}/review/{draft}/merge', [DraftMergeController::class, 'show'])
-    ->name('source-documents.review.merge.show');
+    Route::get('source-documents/{sourceDocument}/review/{draft}/merge', [DraftMergeController::class, 'show'])
+        ->name('source-documents.review.merge.show');
 
-Route::post('source-documents/{sourceDocument}/review/{draft}/merge/synthesize', [DraftMergeController::class, 'synthesize'])
-    ->name('source-documents.review.merge.synthesize');
+    Route::post('source-documents/{sourceDocument}/review/{draft}/merge/synthesize', [DraftMergeController::class, 'synthesize'])
+        ->name('source-documents.review.merge.synthesize');
 
-Route::post('source-documents/{sourceDocument}/review/{draft}/merge', [DraftMergeController::class, 'store'])
-    ->name('source-documents.review.merge.store');
+    Route::post('source-documents/{sourceDocument}/review/{draft}/merge', [DraftMergeController::class, 'store'])
+        ->name('source-documents.review.merge.store');
+});
 
 Route::resource('organizations', OrganizationController::class);
 

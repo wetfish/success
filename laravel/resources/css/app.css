@@ -514,6 +514,52 @@ body {
         color: rgb(96 165 250);
     }
 
+    /* Tag review pills =================================================
+     * Approved (accepted-as-new OR merged-into-existing) uses the pink
+     * accent color — both are positive decisions that result in catalog
+     * attachment. The status-badge-rejected class above (muted grey)
+     * carries through unchanged. Pill text varies per action while the
+     * color stays consistent so the user reads "approved" at a glance
+     * but can scan the text to see exactly what was approved as. */
+    .status-badge--review-approved {
+        background: transparent;
+        border-color: var(--color-accent);
+        color: var(--color-accent);
+    }
+
+    /* Tag review cards =================================================
+     * Each card represents one tag review record with three visual
+     * states keyed off the persisted status. Pending cards use the
+     * standard surface treatment. Approved cards swap the border to
+     * pink — the same accent color as the approved pill, so the card's
+     * outline visually echoes its decision. Rejected cards get a
+     * muted-grey border to recede visually. The background stays the
+     * standard semi-transparent surface in all three states — this
+     * matches the rest of the site's design language (transparent
+     * fills, accent borders for emphasis).
+     */
+    .tag-review-card {
+        padding: 1rem 1.25rem;
+        border-radius: 0.5rem;
+        border: 1px solid var(--color-surface-input-border);
+        background: var(--color-surface-input);
+        transition: border-color 150ms ease;
+    }
+    .tag-review-card--approved { border-color: var(--color-accent); }
+    .tag-review-card--rejected { border-color: rgb(148 163 184 / 0.4); }
+
+    /* The Next button at the bottom of the tag review page reuses
+     * btn-primary, but starts disabled. is-disabled is added by the JS
+     * (and the initial Blade render) when pending records remain.
+     * Removed when pending count hits zero. is-disabled applies to any
+     * link styled as a button — pointer-events: none prevents clicks,
+     * opacity dims, cursor signals the state. */
+    .is-disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+        pointer-events: none;
+    }
+
     /* Merge editor cells ============================================
      * The side-by-side merge UI renders each field as 2 or 3 cells
      * (existing | draft | optional synthesized). Each cell shows a

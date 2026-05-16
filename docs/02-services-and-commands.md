@@ -60,6 +60,18 @@ $this->app->bind(ExtractionProvider::class, FakeExtractionProvider::class);
 - `SynthesisResult` — merged description plus token usage
 - `ExtractionException` — thrown for any provider failure with a user-facing message
 
+### `App\Services\Extraction\ReviewRecordExtractor`
+
+Derives top-level `tag`, `person`, and `link` review records from the nested arrays on a source document's pending entity drafts. Single public method `extract(SourceDocument $document): int` returning the count of review records created.
+
+Walks the document's pending entity drafts, dedupes nested entries (case-insensitive name for tags and people, exact URL for links), pre-computes catalog matches via `TagResolver::preview` and `PersonResolver::preview`, and persists one review record per unique entry.
+
+**Auto-confirm at derivation.** Matched tag and person records land as `status='confirmed'` — the catalog is authoritative, no decision needed. Unmatched land as `status='pending'` for the wizard's review UI to surface. Links always land as `pending` (link review is per-entity-draft, not a wizard step).
+
+**Idempotent.** Re-running on a document that already has any tag/person/link review records is a no-op (returns 0). Refresh via the artisan command's `--force` flag, which deletes pending review records first.
+
+**Wired into `SourceDocumentController::extract`** so derivation runs immediately after entity drafts persist — by the time the user lands on the review page, all review records exist.
+
 ## Draft confirmation
 
 Turning reviewed drafts into real catalog records.
@@ -78,6 +90,10 @@ Internally branches on `record_type` and dispatches to per-type private methods.
 **Parent resolution.** When a draft references a parent by name (positions reference an org, projects reference an org and optionally a position, accomplishments reference a project or position), the confirmer looks up the parent by exact name (case-insensitive). If the parent doesn't exist as a real catalog record yet, confirmation fails with a user-facing message telling the user to confirm the parent first.
 
 This is intentionally exact-match. Fuzzy matching ("Lightning Labs" matches "Lightning Labs Inc"?) is slice 4.5's job — duplicate detection. For now, confirmation is mechanical and predictable.
+
+**Nested attachment uses preview, not resolve.** When entity drafts confirm, `attachNestedTags` and `attachNestedCollaborators` call `TagResolver::preview` / `PersonResolver::preview` (read-only) rather than `resolve()` (find-or-create). Names with no catalog match are skipped, not auto-created. This is the mechanism that enforces the wizard's tag/person review decisions at materialization time: a rejected name is absent from the catalog by the time entity drafts confirm, so attachment skips it naturally. The extracted-data payload is never modified — the audit trail stays intact.
+
+`attachNestedLinks` is symmetric in spirit but creates `Link` rows directly via the parent's morphMany (link review is per-entity-draft, not a separate wizard step). The link's `type` field is validated against `Link::TYPES`; invalid types default to `'other'` since the column is non-nullable.
 
 **Accomplishments are special.** They attach to either a project OR a position, never both. The payload's `project_name` decides which branch. `organization_name` is required for the position-attached branch (positions are identified by org+title and can't be disambiguated without it) but optional for the project-attached branch — if a `project_name` uniquely identifies a project across the catalog, we'll use it directly. If two orgs each have a project with the same name, we error and ask for `organization_name` to disambiguate. This relaxation handles the AI occasionally omitting org_name on accomplishments.
 
@@ -154,4 +170,11 @@ This pattern repeats across the codebase wherever AI output feeds into structure
 
 ## Artisan commands
 
-None project-specific yet. Default Laravel commands (`migrate`, `tinker`, `make:*`, `test`) are the only ones available.
+### `extraction:backfill-review-records`
+
+Derives top-level tag/person/link review records for source documents — useful for backfilling documents extracted before the review-record derivation landed, and for refreshing review records when catalog state has changed (e.g., user added a tag alias and wants the matches to repopulate).
+
+Usage:
+- `php artisan extraction:backfill-review-records` — walks every source document, relies on `ReviewRecordExtractor`'s idempotency to skip docs that already have review records.
+- `php artisan extraction:backfill-review-records --document=N` — targets one document.
+- `php artisan extraction:backfill-review-records --force` — deletes pending tag/person/link review records first, then re-derives. Useful when catalog tags or aliases have been added since the original derivation and the user wants `match_record_id` to repopulate. Prompts for confirmation; bypass with `--no-interaction`. Never touches confirmed/rejected/merged records (user decisions are durable) or entity drafts.

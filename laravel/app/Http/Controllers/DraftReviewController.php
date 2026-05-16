@@ -44,14 +44,29 @@ class DraftReviewController extends Controller
     ];
 
     /**
-     * Entry point. Redirect to the first pending draft for this
-     * document. If no pending drafts exist (everything reviewed),
-     * fall back to the first draft in the queue so the user can
-     * still browse what they decided. If there are no drafts at all,
-     * send the user back to the show page.
+     * Entry point. Routes the user to the appropriate wizard step:
+     *
+     *   1. Tag review (if pending tag review records exist for the doc)
+     *   2. The first pending entity draft (the original behavior)
+     *   3. Fallback: the first draft in any status (so the user can
+     *      still browse what they decided), or the document show page
+     *      if there are no drafts at all
+     *
+     * People review (chunk 4c) will slot in between steps 1 and 2 when
+     * it lands. The tag review step gate also enforces the sequencing
+     * at the entity-draft URL level via RequireTagReviewComplete
+     * middleware, so direct deep-links can't bypass step 1 either.
      */
     public function index(SourceDocument $sourceDocument): RedirectResponse
     {
+        $hasPendingTags = $sourceDocument->extractedRecords()
+            ->where('record_type', 'tag')
+            ->where('status', 'pending')
+            ->exists();
+        if ($hasPendingTags) {
+            return redirect()->route('source-documents.review.tags.show', $sourceDocument);
+        }
+
         $first = $this->pendingDraftsQuery($sourceDocument)->first()
             ?? $this->allDraftsQuery($sourceDocument)->first();
 

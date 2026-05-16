@@ -146,23 +146,54 @@ class DraftConfirmationTest extends TestCase
         // The existing review queue is for entity drafts only. The
         // tag/person/link review records produced by
         // ReviewRecordExtractor live in the same extracted_records
-        // table but have a different action set (confirm/merge/alias
-        // against the catalog) and will get a separate review UI.
-        // Until then, including them in this queue would make the
-        // user navigate to records the existing Confirm action can't
+        // table but have a different action set (accept/reject/alias
+        // for tags, accept/reject for people) and use separate review
+        // UIs. Including them in this queue would make the user
+        // navigate to records the existing Confirm action can't
         // dispatch — DraftConfirmer has no arm for 'tag' or 'link'.
+        //
+        // Note: this test uses person/link review records (not tag)
+        // because tag-pending now redirects to tag review via the
+        // index logic. Person review's wizard step is chunk 4c.
         $doc = $this->makeDocument();
 
         $entityDraft = $this->makeDraft($doc, 'organization', [
             'name' => 'Acme',
             'type' => 'employer',
         ]);
-        $this->makeDraft($doc, 'tag', ['extracted_name' => 'Postgres', 'category' => 'tool']);
         $this->makeDraft($doc, 'person', ['extracted_name' => 'Sarah Chen']);
         $this->makeDraft($doc, 'link', ['url' => 'https://example.com', 'type' => 'website']);
 
         // Index redirects to the first pending draft in the queue —
         // should be the entity draft, not any of the review records.
+        $this->get(route('source-documents.review.index', $doc))
+            ->assertRedirect(route('source-documents.review.show', [
+                'sourceDocument' => $doc,
+                'draft' => $entityDraft->id,
+            ]));
+    }
+
+    #[Test]
+    public function index_redirects_to_tag_review_when_pending_tag_records_exist(): void
+    {
+        // First wizard step takes precedence — the index routes to
+        // tag review before entity drafts.
+        $doc = $this->makeDocument();
+        $this->makeDraft($doc, 'organization', ['name' => 'Acme', 'type' => 'employer']);
+        $this->makeDraft($doc, 'tag', ['extracted_name' => 'Postgres', 'category' => 'tool']);
+
+        $this->get(route('source-documents.review.index', $doc))
+            ->assertRedirect(route('source-documents.review.tags.show', $doc));
+    }
+
+    #[Test]
+    public function index_falls_through_to_entity_drafts_when_tag_records_all_decided(): void
+    {
+        // Decided tag records don't block — the wizard advances.
+        $doc = $this->makeDocument();
+        $entityDraft = $this->makeDraft($doc, 'organization', ['name' => 'Acme', 'type' => 'employer']);
+        $this->makeDraft($doc, 'tag', ['extracted_name' => 'Done', 'category' => 'tool'], 'confirmed');
+
         $this->get(route('source-documents.review.index', $doc))
             ->assertRedirect(route('source-documents.review.show', [
                 'sourceDocument' => $doc,

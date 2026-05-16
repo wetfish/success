@@ -332,10 +332,10 @@ Drafts produced by AI extraction. Stays in this staging table until the user con
 | Column | Type | Nullable | Notes |
 |---|---|---|---|
 | source_document_id | bigInteger | no | FK → source_documents |
-| record_type | string | no | Accepted values: `organization`, `position`, `project`, `accomplishment` |
+| record_type | string | no | Accepted values: `organization`, `position`, `project`, `accomplishment`, `tag`, `person`, `link` |
 | payload | json | no | The draft's would-be field values, shape depends on record_type |
 | status | string | no | Accepted values: `pending`, `confirmed`, `rejected`, `merged`. Default `pending` |
-| match_record_type | string | yes | Eloquent model class name, when duplicate detection finds a candidate match |
+| match_record_type | string | yes | Eloquent model class name or short type key (`tag`, `person`), set when a matching catalog record exists |
 | match_record_id | bigInteger | yes | ID of the matched record |
 
 **Relationships.** `belongsTo` source_document.
@@ -343,6 +343,24 @@ Drafts produced by AI extraction. Stays in this staging table until the user con
 **Cascade.** `source_document_id` → `cascade`. Deleting the source document discards its drafts.
 
 **Indexes.** Compound index on `(source_document_id, status)` for fast review-queue lookups. Index on `record_type`.
+
+**Two distinct uses of this table.** Entity drafts (`organization`/`position`/`project`/`accomplishment`) capture the AI's would-be records; their payloads are full field maps and confirmation creates real catalog rows. Review records (`tag`/`person`/`link`) capture extracted name/URL mentions and exist purely as the review surface for the wizard's pre-entity-confirmation steps. The two record categories share a table because they share the same lifecycle (status transitions, document scoping, derivation/confirmation/rejection) and Laravel-relationship machinery — but they're conceptually separate. Queries that target one category must filter by `record_type`.
+
+**Entity drafts** carry the full payload shape the AI emitted, including nested arrays:
+- `tags`: array of `{name, category?}` objects
+- `collaborators`: array of `{name, role?}` objects
+- `links`: array of `{url, type?, title?, description?, is_personal_appearance?, date?}` objects
+
+The extracted data is immutable. Review never writes to entity-draft payloads — review decisions live on the review-record rows below. At confirmation time, `attachNestedTags` / `attachNestedCollaborators` walk the nested arrays and resolve names against the catalog via `TagResolver::preview` / `PersonResolver::preview` (read-only — no auto-create). Names with no catalog match are skipped, which is how the wizard's tag/person review steps enforce the user's decisions: a rejected name simply doesn't exist in the catalog by the time entity drafts confirm.
+
+**Review records** carry a thinner payload focused on the unique entry the user is deciding on:
+- `tag`: `{extracted_name, category?, catalog_tag_created_by_review?}`
+- `person`: `{extracted_name}`
+- `link`: `{url, type?, title?, description?, is_personal_appearance?, date?}`
+
+The `catalog_tag_created_by_review` flag on tag review records tracks whether an accept action created the catalog tag the record points at (vs. attaching to a pre-existing one). Reject uses this flag to know whether to delete the catalog tag — review only undoes its own mutations, never tags the user manually curated.
+
+Review records are derived by `ReviewRecordExtractor` (services doc) from the nested arrays on entity drafts in the same document. Tag and person records pre-compute matches against the catalog: matched records land as `status='confirmed'` with `match_record_id` set (no decision to make — already in catalog); unmatched land as `status='pending'` for the wizard to surface. Link review records always land as `status='pending'` regardless of URL existence — links are decorative in the wizard MVP and reviewed per-entity-draft in step 3+.
 
 **Notes.** Drafts deliberately live in their own table rather than as soft-statused real records. This keeps the rest of the app simple — every existing query against organizations/positions/projects/accomplishments continues to work without filtering for "real vs draft" status. The trade-off is a small amount of conversion logic at confirmation time (read draft payload → create real record).
 

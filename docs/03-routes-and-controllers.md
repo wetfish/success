@@ -37,15 +37,38 @@ Synchronous extraction with a loading overlay is the MVP approach. When extracti
 
 ## Draft review queue
 
-`DraftReviewController` walks the user through the drafts produced by extraction:
+The review flow is a multi-step wizard. Step 1 is tag review (a dedicated list page); step 2 will be person review (chunk 4c, not yet built); step 3+ walks entity drafts (organizations, positions, projects, accomplishments) one at a time. The index route routes the user to the appropriate step.
+
+### Tag review (wizard step 1)
+
+`TagReviewController` handles the dedicated tag review page where extracted tag names get accepted, rejected, or aliased to existing catalog tags:
 
 | Route | Method | Purpose |
 |---|---|---|
-| `source-documents/{doc}/review` | GET | `index` — redirects to first pending draft, or first draft overall if none pending |
+| `source-documents/{doc}/review/tags` | GET | `show` — render all tag review records for the document, grouped by category. Redirects to the review index when the document has zero tag review records. |
+| `source-documents/{doc}/review/tags/{record}/accept` | POST | `accept` — find-or-create a catalog tag, set status to `confirmed`. Returns `{ok: true, catalog_tag_name}` on success. |
+| `source-documents/{doc}/review/tags/{record}/reject` | POST | `reject` — set status to `rejected`. If the record's previous accept created a catalog tag (tracked via `catalog_tag_created_by_review` payload flag), delete it. |
+| `source-documents/{doc}/review/tags/{record}/alias` | POST | `alias` — body: `{target_tag_id}`. Create a `tag_aliases` row from extracted_name → target tag, set status to `merged`. |
+
+**Idempotent state transitions.** Each action handles any starting state, reverting prior mutations before applying the new state. The user can accept → change mind → reject → change mind → accept again; each transition cleans up the previous decision via `revertPriorDecision`.
+
+**JSON contract for actions.** All three action endpoints return JSON exclusively: `{ok: true}` (plus `catalog_tag_name` on accept) on success, `{error: '...'}` with a 4xx/5xx status on failure. The JS client treats responses uniformly — no partial HTML, no 204s. Show returns Blade.
+
+**Known limitation: dependent record invalidation on reject.** If a tag review record's accept created a catalog tag, and another tag review record then aliased to that catalog tag, rejecting the first record cascade-deletes the alias row (via the `tag_aliases.tag_id` foreign-key cascade). The second record's UI state becomes inconsistent (status=merged, match_record_id points to deleted tag). Recovery: refresh the page, re-decide. Not blocking for MVP — edge case requires aliasing to a review-created tag.
+
+### Entity-draft review (wizard step 3+)
+
+`DraftReviewController` walks the entity drafts produced by extraction:
+
+| Route | Method | Purpose |
+|---|---|---|
+| `source-documents/{doc}/review` | GET | `index` — routes to wizard step 1 if pending tag records exist; else first pending entity draft; else fallback to show page |
 | `source-documents/{doc}/review/{draft}` | GET | `show` — render the draft with form inputs (pending) or read-only display (other statuses); also computes duplicate candidates via `DuplicateDetector` and passes them to the view |
 | `source-documents/{doc}/review/{draft}/confirm` | POST | `confirm` — merge form data into payload, create real record, navigate to next |
 | `source-documents/{doc}/review/{draft}/reject` | POST | `reject` — cascade rejection to dependent drafts, navigate to next |
 | `source-documents/{doc}/review/{draft}/restore` | POST | `restore` — flip a rejected draft back to pending |
+
+The entity-draft routes are wrapped in the `RequireTagReviewComplete` middleware. Deep-linking past tag review while pending tag records exist redirects back to step 1. Tag review pages and action endpoints themselves are not gated.
 
 `DraftMergeController` handles the merge flow when duplicate detection has surfaced one or more candidates:
 
@@ -55,9 +78,9 @@ Synchronous extraction with a loading overlay is the MVP approach. When extracti
 | `source-documents/{doc}/review/{draft}/merge/synthesize` | POST | `synthesize` — JSON endpoint, takes `field` (payload key) plus existing and draft values, returns the synthesized string. Logs an `AiUsageEvent` via the existing tracker |
 | `source-documents/{doc}/review/{draft}/merge` | POST | `store` — execute the merge with chosen per-field values, mark draft `merged`, navigate to next draft in queue |
 
-**Queue ordering.** Drafts are walked type-first: organizations → positions → projects → accomplishments. This matches the dependency structure — by the time the user reaches an accomplishment, its supporting parents have already been reviewed and (presumably) confirmed.
+**Queue ordering.** Entity drafts are walked type-first: organizations → positions → projects → accomplishments. This matches the dependency structure — by the time the user reaches an accomplishment, its supporting parents have already been reviewed and (presumably) confirmed. The queue scope is entity types only; tag/person/link review records are excluded.
 
-**All drafts browsable.** The review page shows every draft regardless of status — pending, rejected, confirmed, or merged. Status badges indicate which is which, and the action bar branches per status (confirm/reject for pending, restore for rejected, status note for others). Nothing is hidden; users can navigate to any draft they reviewed.
+**All drafts browsable.** The review page shows every entity draft regardless of status — pending, rejected, confirmed, or merged. Status badges indicate which is which, and the action bar branches per status (confirm/reject for pending, restore for rejected, status note for others). Nothing is hidden; users can navigate to any draft they reviewed.
 
 **Form-merge confirmation.** The pending draft's display is a `<form>` whose Confirm button submits to the confirm endpoint. The user's edits get merged into the payload and saved before the confirmer runs. This serves two purposes: the user can fix fields the AI omitted (which is the only way to provide missing required fields before confirmation), and edits persist even when confirmation fails (e.g., parent not resolved) so they aren't lost.
 
@@ -70,6 +93,14 @@ Synchronous extraction with a loading overlay is the MVP approach. When extracti
 **Per-field synthesis is on-demand.** The editor renders three options for each textarea field (keep existing, use draft, synthesize). The synthesized value is fetched only when the user clicks the synthesize button, so we don't pre-pay for synthesis on fields the user might not pick the synthesized version for. The endpoint accepts the field name plus both source strings and returns the combined text plus a fresh `AiUsageEvent` id for telemetry.
 
 **Confirmed earlier drafts act as candidates.** A draft that's confirmed earlier in the same source-document review session lives in the real catalog by the time a later draft loads. Detection runs against the catalog, so a position draft whose org has already been confirmed sees the new org record naturally — no special "this draft was just imported" handling is needed. The merge UI treats it like any other existing record.
+
+## Middleware
+
+### `RequireTagReviewComplete`
+
+Applied to entity-draft routes (`source-documents.review.show/confirm/reject/restore/merge.*`). Reads the `{sourceDocument}` route binding, checks for any tag review records with `status='pending'`, and redirects to `source-documents.review.tags.show` if found. Pass-through when no pending tags or when no source document is in the route.
+
+The middleware only considers tag records on the current document and only the `status='pending'` ones. Records the user has already decided (confirmed/rejected/merged) don't gate, and records on other documents are irrelevant. Person review will get its own symmetric middleware when chunk 4c lands.
 
 ## Form requests
 
