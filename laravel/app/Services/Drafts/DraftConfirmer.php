@@ -458,19 +458,27 @@ class DraftConfirmer
      * name as it appears in the document and the category from the
      * closed Tag::CATEGORIES enum.
      *
-     * Each entry is resolved against existing tags/aliases or creates
-     * a new tag — the actual lookup logic lives in TagResolver. The
-     * category is applied only when a new tag is created; existing
-     * tags keep their stored category (user curation wins). Invalid
-     * categories are dropped at the resolver, not here.
+     * Each entry is resolved against the catalog via TagResolver::preview
+     * (read-only — never creates tags). If the name matches an existing
+     * tag (by canonical name or by alias), the entity gets attached to
+     * that tag. If the name has no match, the entry is SKIPPED — no
+     * auto-create, no error.
+     *
+     * Skip-on-no-match is by design. The wizard's step 1 (tag review)
+     * is where the user decides which tag names get materialized into
+     * the catalog. By the time an entity draft confirms (step 3+), the
+     * catalog already reflects the user's tag decisions: accepted tags
+     * exist by name, aliased names resolve via the alias table, and
+     * rejected tags are simply absent. attachNestedTags consults the
+     * catalog as the source of truth and trusts what it finds.
+     *
+     * The extracted data (the entity draft's `tags` payload) is never
+     * modified. It stays as the AI emitted it — that's the immutable
+     * audit trail. Review decisions live on tag review records; this
+     * function reads the consequence of those decisions through the
+     * catalog state, not the records themselves.
      *
      * No-op if the payload has no tags field or it's empty.
-     *
-     * Per-name rejection and rename decisions made during AI review
-     * are not consulted here. Those decisions live as their own
-     * extracted_records rows (record_type = `tag`) and are applied
-     * at their own confirmation step in the wizard flow — see
-     * milestone 4.6 in docs/06-planned-features.md.
      */
     private function attachNestedTags(Model $parent, ExtractedRecord $draft): void
     {
@@ -489,12 +497,14 @@ class DraftConfirmer
                 continue;
             }
 
-            $category = isset($entry['category']) && is_string($entry['category']) && trim($entry['category']) !== ''
-                ? trim($entry['category'])
-                : null;
+            $preview = $this->tagResolver->preview($entry['name']);
+            // 'new' means no catalog match — skip (the user either
+            // rejected this tag during review or hasn't reviewed yet).
+            if ($preview['status'] === 'new') {
+                continue;
+            }
 
-            $tag = $this->tagResolver->resolve($entry['name'], $category);
-            $tagIds[] = $tag->id;
+            $tagIds[] = $preview['tag']->id;
         }
 
         // syncWithoutDetaching deduplicates by key — if the AI emitted
@@ -509,21 +519,27 @@ class DraftConfirmer
      * Attach nested collaborators from a draft payload to a
      * freshly-created parent entity. Each collaborator is
      * `{name: string, role?: string}`. Person names are resolved via
-     * PersonResolver — find an existing person by case-insensitive
-     * name, or create a new one. The role lands in the pivot column
-     * specified by $roleColumn (varies per parent type: role_on_position,
-     * role_on_project, role_on_accomplishment).
+     * PersonResolver::preview (read-only — never creates people).
+     * If the name matches an existing person (case-insensitive), the
+     * entity gets a pivot row to that person. If the name has no
+     * match, the entry is SKIPPED — no auto-create.
      *
-     * Empty role strings normalize to null at the pivot — matches the
-     * convention from PersonRules::buildCollaboratorSyncData used by
-     * the manual form picker, so AI-extracted data lands in the same
-     * shape as user-entered data.
+     * Skip-on-no-match is by design — symmetric with attachNestedTags.
+     * Person decisions live on person review records (wizard step 2);
+     * accepted people exist in the catalog by name, rejected people
+     * are absent. attachNestedCollaborators reads the catalog as the
+     * source of truth.
      *
-     * Per-name rejection and rename decisions made during AI review
-     * are not consulted here. Those decisions live as their own
-     * extracted_records rows (record_type = `person`) and are applied
-     * at their own confirmation step in the wizard flow — see
-     * milestone 4.6 in docs/06-planned-features.md.
+     * The role lands in the pivot column specified by $roleColumn
+     * (varies per parent type: role_on_position, role_on_project,
+     * role_on_accomplishment). Empty role strings normalize to null
+     * at the pivot — matches the convention from
+     * PersonRules::buildCollaboratorSyncData used by the manual form
+     * picker, so AI-extracted data lands in the same shape as
+     * user-entered data.
+     *
+     * The extracted data (the entity draft's `collaborators` payload)
+     * is never modified.
      */
     private function attachNestedCollaborators(Model $parent, ExtractedRecord $draft, string $roleColumn): void
     {
@@ -539,11 +555,17 @@ class DraftConfirmer
                 continue;
             }
 
-            $person = $this->personResolver->resolve($collaborator['name']);
+            $preview = $this->personResolver->preview($collaborator['name']);
+            // No catalog match — skip (user either rejected this person
+            // at step 2 or hasn't reviewed yet).
+            if ($preview['status'] === 'new') {
+                continue;
+            }
+
             $role = isset($collaborator['role']) && is_string($collaborator['role'])
                 ? trim($collaborator['role'])
                 : '';
-            $syncData[$person->id] = [
+            $syncData[$preview['person']->id] = [
                 $roleColumn => $role !== '' ? $role : null,
             ];
         }

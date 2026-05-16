@@ -228,6 +228,8 @@ class SourceDocumentSubmissionTest extends TestCase
             ->first();
         $this->assertNotNull($pythonReview);
         $this->assertSame($existingTag->id, $pythonReview->match_record_id);
+        // Matched at derivation → auto-confirmed (no decision left for review).
+        $this->assertSame('confirmed', $pythonReview->status);
 
         $kubernetesReview = ExtractedRecord::where('source_document_id', $document->id)
             ->where('record_type', 'tag')
@@ -235,6 +237,8 @@ class SourceDocumentSubmissionTest extends TestCase
             ->first();
         $this->assertNotNull($kubernetesReview);
         $this->assertNull($kubernetesReview->match_record_id);
+        // Unmatched → pending (the review UI will surface it).
+        $this->assertSame('pending', $kubernetesReview->status);
     }
 
     #[Test]

@@ -22,17 +22,16 @@ use Illuminate\Support\Facades\DB;
  * happen. That's what this service produces.
  *
  * For each unique entry (case-insensitive by name for tags and people,
- * exact-URL for links), it creates one ExtractedRecord row in 'pending'
- * status. For tags and people, the service uses TagResolver::preview
- * and PersonResolver::preview to pre-compute whether the name already
- * exists in the catalog — if so, match_record_type and match_record_id
- * are set at creation time, giving the review UI an "already exists vs
- * actionable" distinction without having to query at render time.
+ * exact-URL for links), it creates one ExtractedRecord row. For tags
+ * and people, the service uses TagResolver::preview and
+ * PersonResolver::preview to check whether the name already exists in
+ * the catalog. Matched records land as status='confirmed' with
+ * match_record_type and match_record_id set — the user's curated
+ * catalog is authoritative, so there's no decision to make. Unmatched
+ * records land as status='pending' for the review UI to surface.
  *
- * Links don't get a pre-computed match for MVP — the same URL can
- * legitimately live on multiple parents (one Link row per parent), so
- * "does this URL exist anywhere?" isn't a useful disambiguator. Every
- * link review record renders as actionable.
+ * Link records always land as 'pending' for MVP — see
+ * createLinkReviewRecords for the reasoning.
  *
  * Idempotency: if any tag/person/link review records already exist for
  * the document, the service is a no-op. The intent is "derivation runs
@@ -244,19 +243,25 @@ class ReviewRecordExtractor
      * preview() to pre-compute whether a matching catalog tag (or
      * alias) already exists. If so, match_record_type and
      * match_record_id are set so the review UI can render the
-     * "already exists" state without a render-time lookup.
+     * "already exists" state without a render-time lookup — and the
+     * status is set to 'confirmed' directly. A name that already
+     * matches a catalog tag has no decision left to make: the user's
+     * curated catalog is the authority, and the wizard's step 1 only
+     * needs to surface records that actually need a decision.
+     *
+     * Unmatched names land as 'pending' — those are what the user
+     * sees on the tag review page (accept / reject / alias actions).
      *
      * The AI's emitted category is preserved verbatim in the payload,
      * even if it isn't in the closed Tag::CATEGORIES enum — the chunk-4
-     * review UI will validate and normalize at confirmation time, and
-     * preserving the AI's value gives the UI more information to work
-     * with (e.g., displaying "the AI suggested X, please pick a valid
-     * category").
+     * review UI uses it as the default category when the user accepts
+     * a new tag, and preserves it on the record for audit purposes.
      */
     private function createTagReviewRecords(SourceDocument $document, array $entries): int
     {
         foreach ($entries as $entry) {
             $preview = $this->tagResolver->preview($entry['name']);
+            $matched = $preview['tag'];
 
             $payload = ['extracted_name' => $entry['name']];
             if ($entry['category'] !== null) {
@@ -267,9 +272,11 @@ class ReviewRecordExtractor
                 'source_document_id' => $document->id,
                 'record_type' => 'tag',
                 'payload' => $payload,
-                'status' => 'pending',
-                'match_record_type' => $preview['tag'] ? 'tag' : null,
-                'match_record_id' => $preview['tag']?->id,
+                // Matched records are auto-confirmed — no decision needed.
+                // Unmatched records await the user's action in tag review.
+                'status' => $matched ? 'confirmed' : 'pending',
+                'match_record_type' => $matched ? 'tag' : null,
+                'match_record_id' => $matched?->id,
             ]);
         }
         return count($entries);
@@ -277,22 +284,27 @@ class ReviewRecordExtractor
 
     /**
      * Create a person review record per unique entry. Uses
-     * PersonResolver's preview() for pre-compute. People have no
-     * alias system (yet), so preview returns either 'existing' or
-     * 'new' — no third state.
+     * PersonResolver's preview() for pre-compute. Symmetric with
+     * createTagReviewRecords on the auto-confirm front: matched
+     * records land as 'confirmed' (no decision needed), unmatched
+     * land as 'pending' for the wizard's step 2 to act on.
+     *
+     * People have no alias system (yet), so preview returns either
+     * 'existing' or 'new' — no third state.
      */
     private function createPersonReviewRecords(SourceDocument $document, array $entries): int
     {
         foreach ($entries as $entry) {
             $preview = $this->personResolver->preview($entry['name']);
+            $matched = $preview['person'];
 
             ExtractedRecord::create([
                 'source_document_id' => $document->id,
                 'record_type' => 'person',
                 'payload' => ['extracted_name' => $entry['name']],
-                'status' => 'pending',
-                'match_record_type' => $preview['person'] ? 'person' : null,
-                'match_record_id' => $preview['person']?->id,
+                'status' => $matched ? 'confirmed' : 'pending',
+                'match_record_type' => $matched ? 'person' : null,
+                'match_record_id' => $matched?->id,
             ]);
         }
         return count($entries);

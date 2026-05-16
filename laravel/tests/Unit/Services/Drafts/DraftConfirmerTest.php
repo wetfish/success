@@ -572,6 +572,11 @@ class DraftConfirmerTest extends TestCase
     #[Test]
     public function confirming_an_organization_with_nested_tags_attaches_them(): void
     {
+        // Catalog tags must pre-exist for nested attachment to work
+        // (no auto-create — see attachNestedTags docblock).
+        $this->makeTag('B Corp', 'concept');
+        $this->makeTag('Remote First', 'methodology');
+
         $doc = $this->makeDocument();
         $draft = $this->makeDraft($doc, 'organization', [
             'name' => 'Acme',
@@ -635,8 +640,16 @@ class DraftConfirmerTest extends TestCase
     }
 
     #[Test]
-    public function nested_tag_resolution_auto_creates_unknown_tags(): void
+    public function nested_tag_resolution_skips_tags_not_in_catalog(): void
     {
+        // Behavior change in chunk 4a: attachNestedTags no longer
+        // auto-creates tags. A name that doesn't match a catalog tag
+        // (by canonical name or alias) is skipped. The user's tag
+        // review decisions (step 1 of the wizard) determine catalog
+        // state before entity-draft confirmation reaches this point.
+        // A tag missing from the catalog means either (a) the user
+        // rejected it during review or (b) tag review hasn't run yet.
+        // Either way: skip, don't materialize.
         $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
         $doc = $this->makeDocument();
         $draft = $this->makeDraft($doc, 'project', [
@@ -649,11 +662,9 @@ class DraftConfirmerTest extends TestCase
 
         $project = (new DraftConfirmer())->confirm($draft);
 
-        $this->assertSame(1, \App\Models\Tag::count());
-        $newTag = \App\Models\Tag::first();
-        $this->assertSame('Kubernetes', $newTag->name);
-        $this->assertSame('tool', $newTag->category); // Category propagates on auto-create
-        $this->assertSame($newTag->id, $project->tags->first()->id);
+        // No catalog tag created, no attachment.
+        $this->assertSame(0, \App\Models\Tag::count());
+        $this->assertCount(0, $project->tags);
     }
 
     #[Test]
@@ -682,7 +693,10 @@ class DraftConfirmerTest extends TestCase
     public function confirming_an_accomplishment_with_nested_tags_attaches_them(): void
     {
         // Accomplishments are taggable too — the third entity type
-        // with nested tag attachment behavior.
+        // with nested tag attachment behavior. Tags must pre-exist.
+        $this->makeTag('Performance', 'concept');
+        $this->makeTag('Migration', 'concept');
+
         $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
         $project = $this->makeProject($org);
         $doc = $this->makeDocument();
@@ -706,30 +720,14 @@ class DraftConfirmerTest extends TestCase
     }
 
     #[Test]
-    public function nested_tag_category_propagates_to_newly_created_tag(): void
+    public function nested_tag_attachment_does_not_overwrite_existing_category(): void
     {
-        // Confirmer-level coverage of the resolver's category param.
-        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
-        $doc = $this->makeDocument();
-        $draft = $this->makeDraft($doc, 'project', [
-            'organization_name' => 'Acme',
-            'name' => 'A project',
-            'visibility' => 'internal',
-            'contribution_level' => 'core',
-            'tags' => [['name' => 'Rust', 'category' => 'language']],
-        ]);
-
-        (new DraftConfirmer())->confirm($draft);
-
-        $newTag = \App\Models\Tag::where('name', 'Rust')->first();
-        $this->assertNotNull($newTag);
-        $this->assertSame('language', $newTag->category);
-    }
-
-    #[Test]
-    public function nested_tag_category_does_not_overwrite_existing_user_curation(): void
-    {
-        // User-curated category survives a re-extraction that disagrees.
+        // The AI's emitted category for an entity-nested tag is purely
+        // informational — it was used at tag review time (step 1) to
+        // help the user categorize, but by entity-draft confirm time
+        // (step 3+) the catalog tag's category is whatever the user
+        // accepted. attachNestedTags reads from the catalog (via
+        // preview) so the AI's category here is ignored entirely.
         $existing = $this->makeTag('Python', 'language');
         $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
         $doc = $this->makeDocument();
@@ -746,29 +744,6 @@ class DraftConfirmerTest extends TestCase
         $this->assertSame('language', $existing->fresh()->category);
     }
 
-    #[Test]
-    public function nested_tag_with_invalid_category_creates_tag_with_null_category(): void
-    {
-        // AI emitted a category outside Tag::CATEGORIES. The tag is
-        // still created (the mention shouldn't be lost) but with
-        // category = null so review can prompt the user.
-        $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
-        $doc = $this->makeDocument();
-        $draft = $this->makeDraft($doc, 'project', [
-            'organization_name' => 'Acme',
-            'name' => 'A project',
-            'visibility' => 'internal',
-            'contribution_level' => 'core',
-            'tags' => [['name' => 'GraphQL', 'category' => 'query-language']],
-        ]);
-
-        (new DraftConfirmer())->confirm($draft);
-
-        $newTag = \App\Models\Tag::where('name', 'GraphQL')->first();
-        $this->assertNotNull($newTag);
-        $this->assertNull($newTag->category);
-    }
-
     // ────────────────────────────────────────────────────────────
     // Nested collaborators on entity drafts
     // ────────────────────────────────────────────────────────────
@@ -776,6 +751,11 @@ class DraftConfirmerTest extends TestCase
     #[Test]
     public function confirming_a_position_with_nested_collaborators_attaches_them_with_roles(): void
     {
+        // People must pre-exist for attachment (no auto-create —
+        // see attachNestedCollaborators docblock).
+        $this->makePerson('Sarah Chen');
+        $this->makePerson('Alex Rivera');
+
         $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
         $doc = $this->makeDocument();
         $draft = $this->makeDraft($doc, 'position', $this->positionPayload([
@@ -811,8 +791,12 @@ class DraftConfirmerTest extends TestCase
     }
 
     #[Test]
-    public function collaborator_resolution_auto_creates_unknown_people(): void
+    public function collaborator_resolution_skips_people_not_in_catalog(): void
     {
+        // Symmetric with nested_tag_resolution_skips_tags_not_in_catalog.
+        // A person name with no catalog match is skipped, not
+        // auto-created. The user's person review decisions (step 2 of
+        // the wizard) gate which names exist in the catalog.
         $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
         $doc = $this->makeDocument();
         $draft = $this->makeDraft($doc, 'position', $this->positionPayload([
@@ -823,10 +807,8 @@ class DraftConfirmerTest extends TestCase
 
         $position = (new DraftConfirmer())->confirm($draft);
 
-        $this->assertSame(1, \App\Models\Person::count());
-        $person = \App\Models\Person::first();
-        $this->assertSame('Brand New Person', $person->name);
-        $this->assertSame($person->id, $position->collaborators->first()->id);
+        $this->assertSame(0, \App\Models\Person::count());
+        $this->assertCount(0, $position->collaborators);
     }
 
     #[Test]
@@ -850,6 +832,7 @@ class DraftConfirmerTest extends TestCase
     #[Test]
     public function empty_collaborator_role_normalizes_to_null(): void
     {
+        $this->makePerson('Sarah Chen');
         $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
         $doc = $this->makeDocument();
         $draft = $this->makeDraft($doc, 'project', $this->projectPayload([
@@ -870,6 +853,7 @@ class DraftConfirmerTest extends TestCase
         // same person twice in collaborators, we shouldn't fail on
         // the pivot unique constraint. The sync logic keys by person
         // id, so the second entry overwrites the first.
+        $this->makePerson('Sarah Chen');
         $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
         $doc = $this->makeDocument();
         $draft = $this->makeDraft($doc, 'position', $this->positionPayload([
@@ -889,6 +873,7 @@ class DraftConfirmerTest extends TestCase
     #[Test]
     public function confirming_an_accomplishment_with_nested_collaborators_attaches_them(): void
     {
+        $this->makePerson('Sarah Chen');
         $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
         $project = $this->makeProject($org);
         $doc = $this->makeDocument();

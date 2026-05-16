@@ -264,6 +264,9 @@ class ReviewRecordExtractorTest extends TestCase
         $record = ExtractedRecord::where('record_type', 'tag')->first();
         $this->assertSame('tag', $record->match_record_type);
         $this->assertSame($existing->id, $record->match_record_id);
+        // Matched records are auto-confirmed at derivation — no
+        // decision left for the wizard to surface.
+        $this->assertSame('confirmed', $record->status);
     }
 
     #[Test]
@@ -280,6 +283,8 @@ class ReviewRecordExtractorTest extends TestCase
 
         $record = ExtractedRecord::where('record_type', 'tag')->first();
         $this->assertSame($existing->id, $record->match_record_id);
+        // Alias matches auto-confirm the same as name matches.
+        $this->assertSame('confirmed', $record->status);
     }
 
     #[Test]
@@ -295,6 +300,8 @@ class ReviewRecordExtractorTest extends TestCase
         $record = ExtractedRecord::where('record_type', 'tag')->first();
         $this->assertNull($record->match_record_id);
         $this->assertNull($record->match_record_type);
+        // Unmatched records await the user's decision.
+        $this->assertSame('pending', $record->status);
     }
 
     #[Test]
@@ -311,6 +318,8 @@ class ReviewRecordExtractorTest extends TestCase
         $record = ExtractedRecord::where('record_type', 'person')->first();
         $this->assertSame('person', $record->match_record_type);
         $this->assertSame($existing->id, $record->match_record_id);
+        // Symmetric with tags: matched people auto-confirm.
+        $this->assertSame('confirmed', $record->status);
     }
 
     #[Test]
@@ -325,6 +334,7 @@ class ReviewRecordExtractorTest extends TestCase
 
         $record = ExtractedRecord::where('record_type', 'person')->first();
         $this->assertNull($record->match_record_id);
+        $this->assertSame('pending', $record->status);
     }
 
     #[Test]
@@ -332,6 +342,8 @@ class ReviewRecordExtractorTest extends TestCase
     {
         // Even if a Link with the same URL exists in the catalog, MVP
         // policy is to render all link review records as actionable.
+        // Links don't participate in auto-confirm — they always land
+        // as pending.
         $doc = $this->makeDocument();
         $this->makeDraft($doc, 'project', [
             'links' => [['url' => 'https://github.com/acme/migration', 'type' => 'github']],
@@ -341,6 +353,7 @@ class ReviewRecordExtractorTest extends TestCase
 
         $record = ExtractedRecord::where('record_type', 'link')->first();
         $this->assertNull($record->match_record_id);
+        $this->assertSame('pending', $record->status);
     }
 
     // ────────────────────────────────────────────────────────────

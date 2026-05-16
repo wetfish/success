@@ -222,6 +222,14 @@ class DraftFormConfirmationTest extends TestCase
         // the form doesn't supply them. This test asserts that
         // contract: confirming the draft via the form should still
         // materialize the nested tag attachment.
+        //
+        // Note: as of chunk 4a, attachNestedTags reads the catalog
+        // via TagResolver::preview (no auto-create). The Postgres
+        // tag must pre-exist for the entity to pick it up — that
+        // pre-existence is what the chunk-4 tag review wizard step
+        // produces in real usage; here we set it up directly.
+        \App\Models\Tag::create(['name' => 'Postgres', 'category' => 'tool']);
+
         $doc = $this->makeDocument();
         $org = Organization::create(['name' => 'Acme', 'type' => 'employer']);
         $draft = $this->makeDraft($doc, 'project', [

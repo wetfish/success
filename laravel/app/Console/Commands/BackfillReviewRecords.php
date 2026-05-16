@@ -138,9 +138,13 @@ class BackfillReviewRecords extends Command
 
     /**
      * Prompt the user before running a destructive --force pass.
-     * Bypassed automatically by --no-interaction (a global Symfony
-     * Console flag), which is the standard way scripts/CI suppress
-     * confirmations.
+     *
+     * Under --no-interaction (Symfony Console's standard flag for
+     * scripted/CI use), we skip the prompt and proceed. Without the
+     * explicit isInteractive() check, $this->confirm() would still
+     * invoke the underlying prompt machinery and return its $default
+     * (false), silently aborting — the opposite of what scripted
+     * runs want.
      */
     private function confirmForce(int $documentCount): bool
     {
@@ -149,6 +153,10 @@ class BackfillReviewRecords extends Command
             $documentCount,
         ));
         $this->warn('Confirmed/rejected/merged review records are NOT affected.');
+
+        if (! $this->input->isInteractive()) {
+            return true;
+        }
 
         return $this->confirm('Proceed?', false);
     }
