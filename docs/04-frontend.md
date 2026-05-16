@@ -135,7 +135,53 @@ The wizard's step 1: dedicated page at `/source-documents/{doc}/review/tags` for
 
 **JSON-only action endpoints.** Accept / Reject / Alias all return `{ok: true}` on success (Accept also includes `catalog_tag_name`) or `{error: '...'}` with a 4xx/5xx status on failure. The JS client checks `response.ok && parsed.ok` and surfaces the `error` text inline near the record on failure. No partial HTML, no 204s — uniform contract.
 
-**Status-pill styling.** `.status-badge--review-approved` (pink border + text, transparent fill) for confirmed and merged; existing `.status-badge-rejected` (muted slate) for rejected. The two approved states share a color but render different text: "Accepted as X" vs. "Merged into Y." Card borders use `.tag-review-card`, `.tag-review-card--approved`, and `.tag-review-card--rejected` classes.
+**Status-pill styling.** `.status-badge--review-approved` (pink border + text, transparent fill) for confirmed and merged; existing `.status-badge-rejected` (muted slate) for rejected. The two approved states share a color but render different text: "Accepted as X" vs. "Merged into Y." Card borders use `.tag-review-card`, `.tag-review-card--approved`, and `.tag-review-card--rejected` classes — reused across all three review pages despite the `tag-` prefix.
+
+## Person review page
+
+Wizard step 2: dedicated page at `/source-documents/{doc}/review/people` for accepting or rejecting extracted person names. Same structure as the tag review page but simpler — no alias action, no category grouping. Lives at `resources/views/people-reviews/show.blade.php` plus `_record.blade.php`.
+
+**Mentions include role context.** Each person card shows which entity drafts reference that person and in what role (e.g., "Mentioned on: Senior Engineer as Manager (position)"). The role comes from the entity draft's nested `collaborators` array.
+
+- `resources/js/people-review.js` — auto-mounts on `[data-people-review]`, same pattern as tag-review.js. Two actions (accept/reject) instead of three. Progress bar, counter, and next button management identical to tag review. Progress bar elements are searched via `document.querySelector` (not `root.querySelector`) because they sit in the page header outside the mount root.
+
+**Data-attribute contract:**
+
+| Scope | Attribute | Purpose |
+|---|---|---|
+| `[data-people-review]` (root) | — | JS mount point |
+| | contains `[data-people-review-next]` | Next button — JS toggles `is-disabled` class |
+| `[data-people-review-record]` (per card) | `data-accept-url` / `data-reject-url` | Endpoint URLs |
+| | `data-status` | Current decision state |
+| | contains `[data-action="accept|reject"]` buttons | |
+| | contains `[data-people-review-status-badge][data-status-badge="..."]` pills | JS toggles `hidden` |
+| | contains `[data-people-review-error hidden]` | Inline error messages |
+
+Progress bar elements (`data-people-review-reviewed-count`, `data-people-review-progressbar`, `data-people-review-progressbar-fill`) live outside the root in the page header.
+
+## Link review page
+
+Wizard step 3: dedicated page at `/source-documents/{doc}/review/links` for accepting, rejecting, and editing extracted links. Lives at `resources/views/link-reviews/show.blade.php` plus `_record.blade.php`.
+
+Unlike tag and person review, link cards include **editable fields** (URL, title, type dropdown, description textarea, is_personal_appearance checkbox). Fields save on blur/change via the update endpoint — no explicit save button. Edits are orthogonal to accept/reject.
+
+- `resources/js/link-review.js` — auto-mounts on `[data-link-review]`. Combines the accept/reject/counter pattern from tag-review.js with field-editing behavior. Field changes POST to the update endpoint; the response echoes back the updated payload. URL changes also update the clickable display link.
+
+**Data-attribute contract:**
+
+| Scope | Attribute | Purpose |
+|---|---|---|
+| `[data-link-review]` (root) | — | JS mount point |
+| | contains `[data-link-review-next]` | Next button — JS toggles `is-disabled` class |
+| `[data-link-review-record]` (per card) | `data-accept-url` / `data-reject-url` / `data-update-url` | Endpoint URLs |
+| | `data-status` | Current decision state |
+| | contains `[data-field="url|title|type|description|is_personal_appearance"]` | Editable fields — JS reads value on blur/change and POSTs to update URL |
+| | contains `[data-link-review-url-display]` | Clickable `<a>` tag updated when URL field changes |
+| | contains `[data-action="accept|reject"]` buttons | |
+| | contains `[data-link-review-status-badge][data-status-badge="..."]` pills | JS toggles `hidden` |
+| | contains `[data-link-review-error hidden]` | Inline error messages |
+
+Progress bar elements (`data-link-review-reviewed-count`, `data-link-review-progressbar`, `data-link-review-progressbar-fill`) live outside the root in the page header.
 
 ## Merge editor pattern
 

@@ -47,15 +47,17 @@ class DraftReviewController extends Controller
      * Entry point. Routes the user to the appropriate wizard step:
      *
      *   1. Tag review (if pending tag review records exist for the doc)
-     *   2. The first pending entity draft (the original behavior)
-     *   3. Fallback: the first draft in any status (so the user can
+     *   2. Person review (if pending person review records exist)
+     *   3. Link review (if pending link review records exist)
+     *   4. The first pending entity draft (the original behavior)
+     *   5. Fallback: the first draft in any status (so the user can
      *      still browse what they decided), or the document show page
      *      if there are no drafts at all
      *
-     * People review (chunk 4c) will slot in between steps 1 and 2 when
-     * it lands. The tag review step gate also enforces the sequencing
-     * at the entity-draft URL level via RequireTagReviewComplete
-     * middleware, so direct deep-links can't bypass step 1 either.
+     * The tag, person, and link review step gates also enforce
+     * sequencing at the entity-draft URL level via their respective
+     * RequireXxxReviewComplete middlewares, so direct deep-links
+     * can't bypass the review steps either.
      */
     public function index(SourceDocument $sourceDocument): RedirectResponse
     {
@@ -65,6 +67,22 @@ class DraftReviewController extends Controller
             ->exists();
         if ($hasPendingTags) {
             return redirect()->route('source-documents.review.tags.show', $sourceDocument);
+        }
+
+        $hasPendingPeople = $sourceDocument->extractedRecords()
+            ->where('record_type', 'person')
+            ->where('status', 'pending')
+            ->exists();
+        if ($hasPendingPeople) {
+            return redirect()->route('source-documents.review.people.show', $sourceDocument);
+        }
+
+        $hasPendingLinks = $sourceDocument->extractedRecords()
+            ->where('record_type', 'link')
+            ->where('status', 'pending')
+            ->exists();
+        if ($hasPendingLinks) {
+            return redirect()->route('source-documents.review.links.show', $sourceDocument);
         }
 
         $first = $this->pendingDraftsQuery($sourceDocument)->first()

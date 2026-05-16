@@ -164,14 +164,15 @@
                                         @if ($required) required @endif
                                     >
                                 @elseif ($isList)
-                                    {{-- Read-only list rendering. The proper editable UI
-                                         for nested tags/collaborators/links is a separate
-                                         work item; until then, these display as bullet
-                                         lists with type-specific item formatting. The
-                                         controller's confirm() uses array_merge against
-                                         the existing payload, so omitting form inputs
-                                         here doesn't drop the array — it preserves it
-                                         through submit. --}}
+                                    {{-- Read-only list rendering for nested tags,
+                                         collaborators, and links. These display as bullet
+                                         lists with type-specific item formatting. Tags and
+                                         people are reviewed on their dedicated wizard steps;
+                                         links are reviewed on the link review step. The
+                                         controller's confirm() uses array_merge against the
+                                         existing payload, so omitting form inputs here
+                                         doesn't drop the array — it preserves it through
+                                         submit. --}}
                                     @if (is_array($value) && count($value) > 0)
                                         <ul class="text-sm leading-relaxed list-disc list-inside">
                                             @foreach ($value as $item)
@@ -189,7 +190,7 @@
                                                     @elseif ($type === 'link_list')
                                                         <a href="{{ $item['url'] ?? '#' }}" target="_blank" rel="noopener" class="link">{{ ! empty($item['title']) ? $item['title'] : ($item['url'] ?? '(no url)') }}</a>
                                                         @if (! empty($item['type']))
-                                                            <span style="color: var(--color-text-muted);">— {{ $item['type'] }}</span>
+                                                            <span style="color: var(--color-text-muted);">— {{ str_replace('_', ' ', $item['type']) }}</span>
                                                         @endif
                                                     @endif
                                                 </li>
@@ -229,14 +230,45 @@
                     @endphp
                     @if ($value !== null && $value !== '')
                         @php
-                            $displayValue = is_array($value)
+                            $type = $config['type'];
+                            $isList = in_array($type, ['tag_list', 'collaborator_list', 'link_list'], true);
+                            $displayValue = (! $isList && is_array($value))
                                 ? json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
-                                : (string) $value;
-                            $colSpan = strlen($displayValue) > 80 ? 'sm:col-span-2' : '';
+                                : (is_array($value) ? null : (string) $value);
+                            $colSpan = $isList || ($displayValue !== null && strlen($displayValue) > 80) ? 'sm:col-span-2' : '';
                         @endphp
                         <div class="{{ $colSpan }}">
                             <dt class="metadata-label">{{ $config['label'] }}</dt>
-                            <dd class="mt-1 text-sm whitespace-pre-line leading-relaxed">{{ $displayValue }}</dd>
+                            <dd class="mt-1 text-sm {{ $isList ? '' : 'whitespace-pre-line' }} leading-relaxed">
+                                @if ($isList && is_array($value) && count($value) > 0)
+                                    <ul class="list-disc list-inside">
+                                        @foreach ($value as $item)
+                                            <li>
+                                                @if ($type === 'tag_list')
+                                                    {{ $item['name'] ?? '(unnamed)' }}
+                                                    @if (! empty($item['category']))
+                                                        <span style="color: var(--color-text-muted);">({{ $item['category'] }})</span>
+                                                    @endif
+                                                @elseif ($type === 'collaborator_list')
+                                                    {{ $item['name'] ?? '(unnamed)' }}
+                                                    @if (! empty($item['role']))
+                                                        <span style="color: var(--color-text-muted);">— {{ $item['role'] }}</span>
+                                                    @endif
+                                                @elseif ($type === 'link_list')
+                                                    <a href="{{ $item['url'] ?? '#' }}" target="_blank" rel="noopener" class="link">{{ ! empty($item['title']) ? $item['title'] : ($item['url'] ?? '(no url)') }}</a>
+                                                    @if (! empty($item['type']))
+                                                        <span style="color: var(--color-text-muted);">— {{ str_replace('_', ' ', $item['type']) }}</span>
+                                                    @endif
+                                                @endif
+                                            </li>
+                                        @endforeach
+                                    </ul>
+                                @elseif ($isList)
+                                    <span style="color: var(--color-text-muted);">None.</span>
+                                @else
+                                    {{ $displayValue }}
+                                @endif
+                            </dd>
                         </div>
                     @endif
                 @endforeach

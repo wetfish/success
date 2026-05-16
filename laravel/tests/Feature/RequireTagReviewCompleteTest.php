@@ -161,16 +161,16 @@ class RequireTagReviewCompleteTest extends TestCase
     public function middleware_only_considers_tag_records_pending_status(): void
     {
         // Sanity check that only tag-type records affect the gate.
-        // A pending person review record should NOT block entity
-        // drafts — person review is a separate (future) wizard step
-        // with its own gate.
+        // A non-pending person review record should NOT block entity
+        // drafts via this middleware. (A pending one would be caught
+        // by RequirePersonReviewComplete — tested separately.)
         $doc = $this->makeDocument();
         $entityDraft = $this->makeEntityDraft($doc);
         ExtractedRecord::create([
             'source_document_id' => $doc->id,
             'record_type' => 'person',
             'payload' => ['extracted_name' => 'Sarah'],
-            'status' => 'pending',
+            'status' => 'confirmed',
         ]);
 
         $this->get(route('source-documents.review.show', [

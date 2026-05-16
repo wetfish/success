@@ -91,7 +91,7 @@ class DraftFieldSchema
                 'type' => 'link_list',
                 'label' => 'Links',
                 'required' => false,
-                'help' => 'URLs the AI extracted in connection with this organization. Each carries a type (website, careers, etc.) from the closed Link::TYPES enum.',
+                'help' => 'Links associated with this organization, as extracted by the AI.',
             ],
         ];
     }
@@ -156,7 +156,7 @@ class DraftFieldSchema
                 'type' => 'link_list',
                 'label' => 'Links',
                 'required' => false,
-                'help' => 'URLs the AI extracted in connection with this position.',
+                'help' => 'Links associated with this position, as extracted by the AI.',
             ],
         ];
     }
@@ -231,7 +231,7 @@ class DraftFieldSchema
                 'type' => 'link_list',
                 'label' => 'Links',
                 'required' => false,
-                'help' => 'URLs the AI extracted in connection with this project (source repos, live demos, docs, etc.).',
+                'help' => 'Links associated with this project, as extracted by the AI.',
             ],
         ];
     }
@@ -296,7 +296,7 @@ class DraftFieldSchema
                 'type' => 'link_list',
                 'label' => 'Links',
                 'required' => false,
-                'help' => 'URLs the AI extracted in connection with this accomplishment (talk recordings, blog posts, postmortems, etc.).',
+                'help' => 'Links associated with this accomplishment, as extracted by the AI.',
             ],
         ];
     }

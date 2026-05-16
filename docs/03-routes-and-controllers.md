@@ -37,7 +37,7 @@ Synchronous extraction with a loading overlay is the MVP approach. When extracti
 
 ## Draft review queue
 
-The review flow is a multi-step wizard. Step 1 is tag review (a dedicated list page); step 2 will be person review (chunk 4c, not yet built); step 3+ walks entity drafts (organizations, positions, projects, accomplishments) one at a time. The index route routes the user to the appropriate step.
+The review flow is a multi-step wizard. Step 1 is tag review (a dedicated list page); step 2 is person review; step 3 is link review; step 4+ walks entity drafts (organizations, positions, projects, accomplishments) one at a time. The index route routes the user to the appropriate step.
 
 ### Tag review (wizard step 1)
 
@@ -56,19 +56,44 @@ The review flow is a multi-step wizard. Step 1 is tag review (a dedicated list p
 
 **Known limitation: dependent record invalidation on reject.** If a tag review record's accept created a catalog tag, and another tag review record then aliased to that catalog tag, rejecting the first record cascade-deletes the alias row (via the `tag_aliases.tag_id` foreign-key cascade). The second record's UI state becomes inconsistent (status=merged, match_record_id points to deleted tag). Recovery: refresh the page, re-decide. Not blocking for MVP — edge case requires aliasing to a review-created tag.
 
-### Entity-draft review (wizard step 3+)
+### Person review (wizard step 2)
+
+`PersonReviewController` handles the dedicated person review page. Same shape as tag review minus the alias action — people don't have aliases:
+
+| Route | Method | Purpose |
+|---|---|---|
+| `source-documents/{doc}/review/people` | GET | `show` — render all person review records for the document as a flat list. Mentions show which entity drafts reference each person and in what role. Redirects to review index when empty. |
+| `source-documents/{doc}/review/people/{record}/accept` | POST | `accept` — find-or-create a catalog person by case-insensitive name match, set status to `confirmed`. Returns `{ok: true, catalog_person_name}`. |
+| `source-documents/{doc}/review/people/{record}/reject` | POST | `reject` — set status to `rejected`. If the record's previous accept created a catalog person (tracked via `catalog_person_created_by_review` payload flag), delete it (soft-delete — Person uses SoftDeletes). |
+
+**Same JSON contract and idempotent transitions as tag review.** Accept finds existing people by case-insensitive name; creates only when no match exists. The `catalog_person_created_by_review` flag ensures reject only undoes our own mutations.
+
+### Link review (wizard step 3)
+
+`LinkReviewController` handles the dedicated link review page. Adds an `update` action for inline field editing — links have more editable metadata than tags or people:
+
+| Route | Method | Purpose |
+|---|---|---|
+| `source-documents/{doc}/review/links` | GET | `show` — render all link review records with editable fields (URL, title, type, description, is_personal_appearance). Mentions show which entity drafts reference each link. Redirects to review index when empty. |
+| `source-documents/{doc}/review/links/{record}/accept` | POST | `accept` — set status to `confirmed`. No catalog creation — links materialize at entity-draft confirmation time via `attachNestedLinks`. |
+| `source-documents/{doc}/review/links/{record}/reject` | POST | `reject` — set status to `rejected`. The link will be skipped by `attachNestedLinks`. |
+| `source-documents/{doc}/review/links/{record}/update` | POST | `update` — body: any subset of `{url, type, title, description, is_personal_appearance}`. Merges into the review record's payload. Returns `{ok: true, payload}`. The entity draft's nested array stays immutable. |
+
+**Field editing is orthogonal to accept/reject.** The user can edit link fields regardless of status. Edits update the review record's payload; at entity-draft confirmation time, `attachNestedLinks` prefers the review record's payload over the entity draft's original nested entry.
+
+### Entity-draft review (wizard step 4+)
 
 `DraftReviewController` walks the entity drafts produced by extraction:
 
 | Route | Method | Purpose |
 |---|---|---|
-| `source-documents/{doc}/review` | GET | `index` — routes to wizard step 1 if pending tag records exist; else first pending entity draft; else fallback to show page |
+| `source-documents/{doc}/review` | GET | `index` — routes to tag review if pending tag records exist; else person review; else link review; else first pending entity draft; else fallback to show page |
 | `source-documents/{doc}/review/{draft}` | GET | `show` — render the draft with form inputs (pending) or read-only display (other statuses); also computes duplicate candidates via `DuplicateDetector` and passes them to the view |
 | `source-documents/{doc}/review/{draft}/confirm` | POST | `confirm` — merge form data into payload, create real record, navigate to next |
 | `source-documents/{doc}/review/{draft}/reject` | POST | `reject` — cascade rejection to dependent drafts, navigate to next |
 | `source-documents/{doc}/review/{draft}/restore` | POST | `restore` — flip a rejected draft back to pending |
 
-The entity-draft routes are wrapped in the `RequireTagReviewComplete` middleware. Deep-linking past tag review while pending tag records exist redirects back to step 1. Tag review pages and action endpoints themselves are not gated.
+The entity-draft routes are wrapped in three middlewares: `RequireTagReviewComplete`, `RequirePersonReviewComplete`, and `RequireLinkReviewComplete`. Deep-linking past any review step while pending records exist redirects to the earliest incomplete step (tag → person → link). Review pages and their action endpoints are not gated by their own middleware.
 
 `DraftMergeController` handles the merge flow when duplicate detection has surfaced one or more candidates:
 
@@ -100,7 +125,15 @@ The entity-draft routes are wrapped in the `RequireTagReviewComplete` middleware
 
 Applied to entity-draft routes (`source-documents.review.show/confirm/reject/restore/merge.*`). Reads the `{sourceDocument}` route binding, checks for any tag review records with `status='pending'`, and redirects to `source-documents.review.tags.show` if found. Pass-through when no pending tags or when no source document is in the route.
 
-The middleware only considers tag records on the current document and only the `status='pending'` ones. Records the user has already decided (confirmed/rejected/merged) don't gate, and records on other documents are irrelevant. Person review will get its own symmetric middleware when chunk 4c lands.
+The middleware only considers tag records on the current document and only the `status='pending'` ones. Records the user has already decided (confirmed/rejected/merged) don't gate, and records on other documents are irrelevant.
+
+### `RequirePersonReviewComplete`
+
+Symmetric with `RequireTagReviewComplete`. Checks for pending person review records and redirects to `source-documents.review.people.show`. Applied to entity-draft routes alongside the tag middleware. Fires after the tag middleware (registration order), so a document with both pending tags and pending people redirects to tag review first.
+
+### `RequireLinkReviewComplete`
+
+Symmetric with the tag and person middlewares. Checks for pending link review records and redirects to `source-documents.review.links.show`. Fires last in the chain. All three middlewares together enforce the wizard sequence: tags → people → links → entity drafts.
 
 ## Form requests
 

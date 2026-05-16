@@ -178,3 +178,23 @@ Usage:
 - `php artisan extraction:backfill-review-records` — walks every source document, relies on `ReviewRecordExtractor`'s idempotency to skip docs that already have review records.
 - `php artisan extraction:backfill-review-records --document=N` — targets one document.
 - `php artisan extraction:backfill-review-records --force` — deletes pending tag/person/link review records first, then re-derives. Useful when catalog tags or aliases have been added since the original derivation and the user wants `match_record_id` to repopulate. Prompts for confirmation; bypass with `--no-interaction`. Never touches confirmed/rejected/merged records (user decisions are durable) or entity drafts.
+
+### `extraction:re-extract`
+
+Re-runs the full extraction pipeline on an existing source document. Deletes all extracted records (entity drafts and review records), calls `ExtractionProvider::extract`, persists new drafts, and runs `ReviewRecordExtractor` to derive fresh review records. The document re-enters the review wizard from scratch.
+
+This is a destructive operation: all previous review decisions (accept/reject/alias) are lost. Catalog records created during previous review sessions (tags, people, organizations, etc.) are NOT deleted — they persist independently. AI usage events are also preserved for cost tracking.
+
+Usage:
+- `php artisan extraction:re-extract --document=8` — re-extracts a single document. Prompts for confirmation showing the document title and how many records will be deleted.
+- `php artisan extraction:re-extract --document=8 --no-interaction` — skips the confirmation prompt for scripted use.
+
+The `--document` option is required — there is no "re-extract everything" mode to prevent accidental mass data loss.
+
+### `test:extraction`
+
+Manual test loop for the extraction pipeline. Prompts for pasted text input (terminated by a line containing just "EOF"), runs it through the configured provider, and dumps the resulting drafts as JSON. Used during prompt design iteration.
+
+Usage:
+- `php artisan test:extraction` — ephemeral mode. Builds a transient SourceDocument, extracts, prints results. Nothing is saved to the database.
+- `php artisan test:extraction --persist` — saves the SourceDocument, records an AiUsageEvent, and writes each draft to extracted_records as a pending row. Use for a real extraction run that produces reviewable drafts and tracked usage data.

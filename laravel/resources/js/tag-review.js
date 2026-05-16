@@ -33,9 +33,11 @@ document.addEventListener('DOMContentLoaded', () => {
 function initTagReview(root) {
     const searchUrl = root.dataset.searchUrl;
     const nextButton = root.querySelector('[data-tag-review-next]');
-    const reviewedCountEl = root.querySelector('[data-tag-review-reviewed-count]');
-    const progressbarFill = root.querySelector('[data-tag-review-progressbar-fill]');
-    const progressbarEl = root.querySelector('[data-tag-review-progressbar]');
+    // Progress bar elements live outside [data-tag-review] in the DOM
+    // (they're in the page header), so search document, not root.
+    const reviewedCountEl = document.querySelector('[data-tag-review-reviewed-count]');
+    const progressbarFill = document.querySelector('[data-tag-review-progressbar-fill]');
+    const progressbarEl = document.querySelector('[data-tag-review-progressbar]');
     const records = root.querySelectorAll('[data-tag-review-record]');
 
     if (!searchUrl) {

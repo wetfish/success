@@ -583,6 +583,15 @@ class DraftConfirmer
      * Laravel's morphMany handles the (linkable_type, linkable_id)
      * columns automatically when the row is created via the relation.
      *
+     * Consults link review records (derived by ReviewRecordExtractor)
+     * for each nested entry:
+     *   - If the review record's status is 'rejected', skip the link.
+     *   - If the review record has edited payload fields, prefer those
+     *     over the entity draft's original nested entry.
+     *   - If no review record exists (edge case), or the status is
+     *     'pending' or 'confirmed', materialize the link (implicit
+     *     accept for pending — see the handoff doc's design decision).
+     *
      * The `type` field is validated against Link::TYPES; an unrecognized
      * value defaults to "other" since the column is non-nullable. A
      * missing or empty `type` also defaults to "other". This matches
@@ -600,6 +609,14 @@ class DraftConfirmer
             return;
         }
 
+        // Load link review records for this document, keyed by URL.
+        // One query for the document — the per-entry lookup is in-PHP.
+        $reviewMap = ExtractedRecord::query()
+            ->where('source_document_id', $draft->source_document_id)
+            ->where('record_type', 'link')
+            ->get()
+            ->keyBy(fn ($r) => $r->payload['url'] ?? '');
+
         foreach ($linkEntries as $entry) {
             if (! is_array($entry) || empty($entry['url']) || ! is_string($entry['url'])) {
                 continue;
@@ -608,24 +625,39 @@ class DraftConfirmer
                 continue;
             }
 
-            $type = isset($entry['type']) && is_string($entry['type']) && in_array($entry['type'], Link::TYPES, true)
-                ? $entry['type']
+            $url = trim($entry['url']);
+
+            // Consult the review record. Rejected links are skipped.
+            $reviewRecord = $reviewMap[$url] ?? null;
+            if ($reviewRecord && $reviewRecord->status === 'rejected') {
+                continue;
+            }
+
+            // Prefer the review record's payload (may contain user edits)
+            // over the entity draft's nested entry. Fall back to the
+            // nested entry when no review record exists.
+            $source = ($reviewRecord && is_array($reviewRecord->payload))
+                ? $reviewRecord->payload
+                : $entry;
+
+            $type = isset($source['type']) && is_string($source['type']) && in_array($source['type'], Link::TYPES, true)
+                ? $source['type']
                 : 'other';
 
             $attributes = [
-                'url' => trim($entry['url']),
+                'url' => trim($source['url'] ?? $url),
                 'type' => $type,
             ];
 
             // Optional descriptive fields — pass through when present.
             foreach (['title', 'description', 'date'] as $field) {
-                if (isset($entry[$field]) && is_string($entry[$field]) && trim($entry[$field]) !== '') {
-                    $attributes[$field] = $entry[$field];
+                if (isset($source[$field]) && is_string($source[$field]) && trim($source[$field]) !== '') {
+                    $attributes[$field] = $source[$field];
                 }
             }
 
-            if (isset($entry['is_personal_appearance']) && is_bool($entry['is_personal_appearance'])) {
-                $attributes['is_personal_appearance'] = $entry['is_personal_appearance'];
+            if (isset($source['is_personal_appearance']) && is_bool($source['is_personal_appearance'])) {
+                $attributes['is_personal_appearance'] = $source['is_personal_appearance'];
             }
 
             $parent->links()->create($attributes);

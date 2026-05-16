@@ -5,6 +5,7 @@ use App\Http\Controllers\CareerInputController;
 use App\Http\Controllers\DraftMergeController;
 use App\Http\Controllers\DraftReviewController;
 use App\Http\Controllers\LinkController;
+use App\Http\Controllers\LinkReviewController;
 use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\PersonController;
 use App\Http\Controllers\PositionController;
@@ -12,7 +13,10 @@ use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\SourceDocumentController;
 use App\Http\Controllers\TagAliasController;
 use App\Http\Controllers\TagController;
+use App\Http\Controllers\PersonReviewController;
 use App\Http\Controllers\TagReviewController;
+use App\Http\Middleware\RequireLinkReviewComplete;
+use App\Http\Middleware\RequirePersonReviewComplete;
 use App\Http\Middleware\RequireTagReviewComplete;
 use Illuminate\Support\Facades\Route;
 
@@ -111,14 +115,45 @@ Route::post('source-documents/{sourceDocument}/review/tags/{record}/reject', [Ta
 Route::post('source-documents/{sourceDocument}/review/tags/{record}/alias', [TagReviewController::class, 'alias'])
     ->name('source-documents.review.tags.alias');
 
+/* Person review wizard step. Same shape as tag review minus the alias
+ * action — people don't have aliases. Accept finds-or-creates a
+ * catalog person; reject undoes our own creates. Slots between tag
+ * review and entity-draft review in the wizard sequence. */
+Route::get('source-documents/{sourceDocument}/review/people', [PersonReviewController::class, 'show'])
+    ->name('source-documents.review.people.show');
+
+Route::post('source-documents/{sourceDocument}/review/people/{record}/accept', [PersonReviewController::class, 'accept'])
+    ->name('source-documents.review.people.accept');
+
+Route::post('source-documents/{sourceDocument}/review/people/{record}/reject', [PersonReviewController::class, 'reject'])
+    ->name('source-documents.review.people.reject');
+
+/* Link review wizard step. Same shape as person review plus an update
+ * action for editing link fields (url, type, title, description,
+ * is_personal_appearance). Links are reviewed document-wide — the
+ * URL-deduped review records span all entity drafts. */
+Route::get('source-documents/{sourceDocument}/review/links', [LinkReviewController::class, 'show'])
+    ->name('source-documents.review.links.show');
+
+Route::post('source-documents/{sourceDocument}/review/links/{record}/accept', [LinkReviewController::class, 'accept'])
+    ->name('source-documents.review.links.accept');
+
+Route::post('source-documents/{sourceDocument}/review/links/{record}/reject', [LinkReviewController::class, 'reject'])
+    ->name('source-documents.review.links.reject');
+
+Route::post('source-documents/{sourceDocument}/review/links/{record}/update', [LinkReviewController::class, 'update'])
+    ->name('source-documents.review.links.update');
+
 Route::get('source-documents/{sourceDocument}/review', [DraftReviewController::class, 'index'])
     ->name('source-documents.review.index');
 
-/* Entity-draft review routes are gated by RequireTagReviewComplete:
- * if the source document has pending tag review records, hitting any
- * of these URLs redirects to the tag review page. This enforces the
- * wizard sequencing — users can't deep-link past step 1. */
-Route::middleware(RequireTagReviewComplete::class)->group(function () {
+/* Entity-draft review routes are gated by all three review-complete
+ * middlewares: RequireTagReviewComplete, RequirePersonReviewComplete,
+ * and RequireLinkReviewComplete. If the source document has pending
+ * review records for any step, hitting these URLs redirects to the
+ * appropriate review page. Middlewares fire in list order (tag →
+ * person → link), so the earliest incomplete step wins. */
+Route::middleware([RequireTagReviewComplete::class, RequirePersonReviewComplete::class, RequireLinkReviewComplete::class])->group(function () {
     Route::get('source-documents/{sourceDocument}/review/{draft}', [DraftReviewController::class, 'show'])
         ->name('source-documents.review.show');
 
