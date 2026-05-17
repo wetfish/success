@@ -96,6 +96,12 @@
                         Career Input
                     </a>
                     <a
+                        href="{{ route('job-listings.index') }}"
+                        class="nav-modal-link {{ request()->routeIs('job-listings.*') ? 'is-current' : '' }}"
+                    >
+                        Job Listings
+                    </a>
+                    <a
                         href="{{ route('organizations.index') }}"
                         class="nav-modal-link {{ request()->routeIs('organizations.*') ? 'is-current' : '' }}"
                     >

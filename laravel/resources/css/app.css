@@ -9,6 +9,7 @@
  * `@layer components` so they slot into Tailwind's layer cascade. */
 @import './components/tag-picker.css';
 @import './components/person-picker.css';
+@import './components/org-picker.css';
 
 @theme {
     --font-sans: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',

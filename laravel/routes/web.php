@@ -4,6 +4,7 @@ use App\Http\Controllers\AccomplishmentController;
 use App\Http\Controllers\CareerInputController;
 use App\Http\Controllers\DraftMergeController;
 use App\Http\Controllers\DraftReviewController;
+use App\Http\Controllers\JobListingController;
 use App\Http\Controllers\LinkController;
 use App\Http\Controllers\LinkReviewController;
 use App\Http\Controllers\OrganizationController;
@@ -176,6 +177,17 @@ Route::middleware([RequireTagReviewComplete::class, RequirePersonReviewComplete:
         ->name('source-documents.review.merge.store');
 });
 
+/* Organization search and quick-create for the org picker.
+ * Must be declared BEFORE Route::resource — otherwise
+ * `organizations/search` matches `organizations/{organization}`
+ * with "search" as the ID. Same pattern as tags.search and
+ * people.search. */
+Route::get('organizations/search', [OrganizationController::class, 'search'])
+    ->name('organizations.search');
+
+Route::post('organizations/quick-store', [OrganizationController::class, 'quickStore'])
+    ->name('organizations.quick-store');
+
 Route::resource('organizations', OrganizationController::class);
 
 /* Positions are always created in the context of an organization. */
@@ -280,3 +292,10 @@ Route::get('people/search', [PersonController::class, 'search'])
     ->name('people.search');
 
 Route::resource('people', PersonController::class);
+
+/* Job listings — entry point to the resume generation flow.
+ * Top-level resource (not nested under organizations) because
+ * the org picker on the form handles the association, and a
+ * top-level route means users don't need to navigate into an
+ * org first to create a listing. */
+Route::resource('job-listings', JobListingController::class);
