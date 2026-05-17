@@ -54,6 +54,11 @@ class Organization extends Model
         return $this->hasMany(Project::class);
     }
 
+    public function jobListings(): HasMany
+    {
+        return $this->hasMany(JobListing::class);
+    }
+
     public function people(): HasMany
     {
         return $this->hasMany(Person::class, 'current_organization_id');
