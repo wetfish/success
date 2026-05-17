@@ -444,6 +444,98 @@ Many-to-many between accomplishments and people, with a small bit of context per
 
 ---
 
+### Resume generation
+
+The tables that support the resume generation flow — capturing job listings, curating catalog entries for relevance, generating drafts, and producing formatted output files.
+
+#### `job_listings`
+
+Entry point to the resume generation flow. A job listing is a child of an organization (typically type `prospect`, though applying to a former employer is valid). Stores the raw pasted listing text and, optionally, AI-extracted structured data.
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| organization_id | bigInteger | no | FK → organizations |
+| role_title | string | no | |
+| body | text | no | The raw pasted listing text, preserved verbatim |
+| structured_data | json | yes | AI-extracted fields (requirements, nice-to-haves, responsibilities, etc.). Shape will evolve during dogfooding — JSON avoids premature column commitments |
+| source_url | string | yes | Where the listing was found |
+| location | string | yes | Free text — "Remote", "NYC (hybrid)", "San Francisco, CA" |
+| compensation_range | string | yes | Free text — "$120-150k", "competitive", "$80/hr". Free text rather than structured money fields because listing formats vary wildly and this data is for AI context, not arithmetic |
+| date_posted | date | yes | |
+| status | string | no | Accepted values: `active`, `closed`. Default `active` |
+
+**Relationships.** `belongsTo` organization. `hasMany` resume_drafts.
+
+**Cascade.** `organization_id` → `cascade`.
+
+**Soft deletes.** Yes.
+
+#### `resume_drafts`
+
+One draft per resume generation attempt against a job listing. The `status` column drives the three-step wizard flow: select catalog entries → generate/edit draft → format final document. A listing can have multiple drafts over time (user wants a different angle, or re-generates after updating their catalog).
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| job_listing_id | bigInteger | no | FK → job_listings |
+| generated_content | text | yes | AI-generated markdown. Immutable once written — this is the "original" for revert purposes. Null during the `selecting` phase |
+| user_content | text | yes | Starts as a copy of `generated_content`, user edits this. Null until generation completes |
+| format_preference | string | yes | Accepted values: `docx`, `pdf`. Default null |
+| status | string | no | Accepted values: `selecting`, `drafting`, `editing`, `approved`, `formatted`. Default `selecting` |
+
+**Relationships.** `belongsTo` job_listing. `hasMany` resume_selections. `hasMany` resume_artifacts.
+
+**Cascade.** `job_listing_id` → `cascade`.
+
+**Soft deletes.** Yes.
+
+**Notes.** Status transitions enforce the wizard flow: `selecting` → user reviewing AI-suggested catalog entries (step 1); `drafting` → selections confirmed, AI generation in progress; `editing` → draft generated, user reviewing/editing (step 2); `approved` → ready for formatting; `formatted` → final document generated (step 3 complete).
+
+Content is stored as two columns (`generated_content` and `user_content`) rather than a revisions table. MVP only needs "revert to original" — a full `resume_revisions` table is additive if users want undo history later.
+
+#### `resume_selections`
+
+Tracks which catalog entries the AI suggested for a resume and whether the user chose to include each one. This is the step 1 output — the curated set of experience that feeds into draft generation.
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| resume_draft_id | bigInteger | no | FK → resume_drafts |
+| selectable_type | string | no | Polymorphic model class: Position, Project, Accomplishment, CareerTheme, Tag, Link |
+| selectable_id | bigInteger | no | ID of the catalog record |
+| selected | boolean | no | Default `true`. True = include in resume, false = user excluded it |
+| ai_reasoning | text | yes | Why the AI suggested this entry — shown in the review UI to help the user decide |
+| display_order | integer | no | Default `0`. Controls rendering order within each type group |
+
+**Relationships.** `belongsTo` resume_draft. `morphTo` selectable.
+
+**Cascade.** `resume_draft_id` → `cascade`.
+
+**Soft deletes.** No — lightweight decision records, similar to `accomplishment_collaborators`.
+
+**Indexes.** Compound index on `(resume_draft_id, selectable_type)` for fast grouped lookups. Compound index on `(selectable_type, selectable_id)` for the reverse query ("which resumes used this accomplishment?").
+
+**Notes.** The AI suggests entries across six entity types: positions (which jobs to include), projects and accomplishments (the evidence under each job), career themes (the narrative spine), tags (skills to highlight), and links where `is_personal_appearance = true` (portfolio items to feature). The user toggles `selected` on each. At draft generation time, only `selected = true` entries feed into the prompt. The review UI groups selections by position, with projects and accomplishments nested under their parent position via existing relationships — that grouping is derived at render time, not stored here.
+
+#### `resume_artifacts`
+
+Immutable formatted output files. Each artifact is a point-in-time snapshot of a rendered resume.
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| resume_draft_id | bigInteger | no | FK → resume_drafts |
+| file_path | string | no | Relative storage path |
+| file_format | string | no | Accepted values: `docx`, `pdf` |
+| file_size_bytes | unsignedInteger | yes | Populated after generation |
+
+**Relationships.** `belongsTo` resume_draft.
+
+**Cascade.** `resume_draft_id` → `cascade`.
+
+**Soft deletes.** Yes — generated resumes are immutable artifacts per the mission doc.
+
+**Notes.** A draft can have multiple artifacts (user generates a .docx, then also wants a .pdf, or re-generates after editing). Each is a point-in-time snapshot. The `user_content` that produced it is on the parent `resume_drafts` row.
+
+---
+
 ## Cascade behavior summary
 
 For quick reference, here's every foreign key and what happens on parent deletion:
@@ -469,6 +561,11 @@ For quick reference, here's every foreign key and what happens on parent deletio
 | `accomplishment_collaborators` (both sides) | cascade |
 | `extracted_records.source_document_id` → source_documents | cascade |
 | `ai_usage_events.source_document_id` → source_documents | set null |
+| `ai_usage_events.resume_draft_id` → resume_drafts | set null |
+| `job_listings.organization_id` → organizations | cascade |
+| `resume_drafts.job_listing_id` → job_listings | cascade |
+| `resume_selections.resume_draft_id` → resume_drafts | cascade |
+| `resume_artifacts.resume_draft_id` → resume_drafts | cascade |
 
 **A note on soft deletes vs. cascade.** When an entity is *soft-deleted* (`deleted_at` set), child rows are not affected — they remain pointing at a soft-deleted parent. Eloquent's default behavior excludes soft-deleted records from queries, so children effectively "orphan" until either the parent is restored (relationships work again) or the parent is hard-deleted (cascade fires). This is intentional: it makes accidental-delete recovery clean and predictable.
 
@@ -498,5 +595,5 @@ These are documented in the deferred features table in `06-planned-features.md`.
 - `project_relationships` (parent/child via `parent_project_id` covers MVP needs)
 - `decisions` (the `rationale` field on projects covers MVP needs)
 - `accomplishment_variants` (resume builder feature)
-- `job_listings`, `applications`, `generated_resumes` (resume builder feature)
+- `applications` (resume builder — application tracking milestone)
 - `references`, `certifications`, `education`
