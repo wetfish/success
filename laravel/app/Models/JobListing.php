@@ -50,4 +50,9 @@ class JobListing extends Model
     {
         return $this->hasMany(ResumeDraft::class);
     }
+
+    public function requirements(): HasMany
+    {
+        return $this->hasMany(JobListingRequirement::class);
+    }
 }

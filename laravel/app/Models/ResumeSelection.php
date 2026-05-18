@@ -24,10 +24,12 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  */
 #[Fillable([
     'resume_draft_id',
+    'job_listing_requirement_id',
     'selectable_type',
     'selectable_id',
     'selected',
     'ai_reasoning',
+    'user_relevance_note',
     'display_order',
 ])]
 class ResumeSelection extends Model
@@ -43,6 +45,11 @@ class ResumeSelection extends Model
     public function resumeDraft(): BelongsTo
     {
         return $this->belongsTo(ResumeDraft::class);
+    }
+
+    public function requirement(): BelongsTo
+    {
+        return $this->belongsTo(JobListingRequirement::class, 'job_listing_requirement_id');
     }
 
     public function selectable(): MorphTo

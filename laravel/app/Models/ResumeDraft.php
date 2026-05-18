@@ -23,6 +23,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  */
 #[Fillable([
     'job_listing_id',
+    'strategy_summary_generated',
+    'strategy_summary',
     'generated_content',
     'user_content',
     'format_preference',
