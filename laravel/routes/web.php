@@ -11,6 +11,7 @@ use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\PersonController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\ProjectController;
+use App\Http\Controllers\ResumeDraftController;
 use App\Http\Controllers\SourceDocumentController;
 use App\Http\Controllers\TagAliasController;
 use App\Http\Controllers\TagController;
@@ -299,3 +300,19 @@ Route::resource('people', PersonController::class);
  * top-level route means users don't need to navigate into an
  * org first to create a listing. */
 Route::resource('job-listings', JobListingController::class);
+
+/* Resume draft wizard routes.
+ * Not a standard resource — the flow is: create (POST from job listing
+ * page) → show (selection review) → toggle (AJAX) → confirm (POST).
+ * Each route is named explicitly for clarity. */
+Route::post('job-listings/{job_listing}/resume-drafts', [ResumeDraftController::class, 'create'])
+    ->name('resume-drafts.create');
+
+Route::get('resume-drafts/{resume_draft}', [ResumeDraftController::class, 'show'])
+    ->name('resume-drafts.show');
+
+Route::post('resume-drafts/{resume_draft}/selections/{selection}/toggle', [ResumeDraftController::class, 'toggle'])
+    ->name('resume-drafts.toggle');
+
+Route::post('resume-drafts/{resume_draft}/confirm', [ResumeDraftController::class, 'confirm'])
+    ->name('resume-drafts.confirm');

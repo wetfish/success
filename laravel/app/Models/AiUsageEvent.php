@@ -18,6 +18,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'model',
     'operation',
     'source_document_id',
+    'resume_draft_id',
     'input_tokens',
     'output_tokens',
     'cost_cents',
@@ -33,6 +34,9 @@ class AiUsageEvent extends Model
         'summarize_title',
         'count_tokens',
         'health_check',
+        'analyze_relevance',
+        'generate_resume',
+        'format_resume',
     ];
 
     protected function casts(): array
@@ -48,5 +52,10 @@ class AiUsageEvent extends Model
     public function sourceDocument(): BelongsTo
     {
         return $this->belongsTo(SourceDocument::class);
+    }
+
+    public function resumeDraft(): BelongsTo
+    {
+        return $this->belongsTo(ResumeDraft::class);
     }
 }

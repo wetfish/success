@@ -3,10 +3,12 @@
 namespace App\Services;
 
 use App\Models\AiUsageEvent;
+use App\Models\ResumeDraft;
 use App\Models\SourceDocument;
 use App\Services\Extraction\ExtractionResult;
 use App\Services\Extraction\SummaryResult;
 use App\Services\Extraction\SynthesisResult;
+use App\Services\Resume\RelevanceResult;
 
 /**
  * Records AI API calls to the ai_usage_events table. Decoupled from
@@ -71,17 +73,37 @@ class AiUsageTracker
         string $operation,
         string $errorMessage,
         ?SourceDocument $document = null,
+        ?ResumeDraft $resumeDraft = null,
     ): AiUsageEvent {
         return AiUsageEvent::create([
             'provider' => $provider,
             'model' => $model,
             'operation' => $operation,
             'source_document_id' => $document?->id,
+            'resume_draft_id' => $resumeDraft?->id,
             'input_tokens' => 0,
             'output_tokens' => 0,
             'cost_cents' => 0,
             'success' => false,
             'error_message' => $errorMessage,
+        ]);
+    }
+
+    public function recordResumeAi(
+        RelevanceResult $result,
+        string $provider,
+        string $operation,
+        ?ResumeDraft $resumeDraft = null,
+    ): AiUsageEvent {
+        return AiUsageEvent::create([
+            'provider' => $provider,
+            'model' => $result->model,
+            'operation' => $operation,
+            'resume_draft_id' => $resumeDraft?->id,
+            'input_tokens' => $result->inputTokens,
+            'output_tokens' => $result->outputTokens,
+            'cost_cents' => $result->costCents,
+            'success' => true,
         ]);
     }
 }

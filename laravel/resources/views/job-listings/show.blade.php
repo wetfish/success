@@ -78,4 +78,55 @@
             style="border-color: var(--color-surface-input-border); background: var(--color-surface-input);"
         >{{ $jobListing->body }}</div>
     </div>
+
+    {{-- Resume generation section --}}
+    <div class="mb-12">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold">Resume Drafts</h2>
+            <form method="POST" action="{{ route('resume-drafts.create', $jobListing) }}">
+                @csrf
+                <button type="submit" class="btn-primary">
+                    Generate Resume
+                </button>
+            </form>
+        </div>
+
+        @if ($jobListing->resumeDrafts->isEmpty())
+            <div
+                class="border border-dashed rounded-lg p-8 text-center text-sm"
+                style="border-color: var(--color-surface-input-border); color: var(--color-text-secondary);"
+            >
+                No resume drafts yet. Click "Generate Resume" to analyze this listing against your catalog and start building a tailored resume.
+            </div>
+        @else
+            <ul
+                class="rounded-lg overflow-hidden border"
+                style="border-color: var(--color-surface-input-border); background: var(--color-surface-input);"
+            >
+                @foreach ($jobListing->resumeDrafts->sortByDesc('created_at') as $draft)
+                    <li class="@if (! $loop->first) border-t @endif" style="border-color: var(--color-divider);">
+                        <a href="{{ route('resume-drafts.show', $draft) }}" class="list-row">
+                            <div class="flex items-center justify-between gap-4">
+                                <div class="min-w-0">
+                                    <h3 class="font-medium">
+                                        Draft #{{ $draft->id }}
+                                    </h3>
+                                    <p class="text-sm mt-0.5" style="color: var(--color-text-secondary);">
+                                        Created {{ $draft->created_at->format('M j, Y g:ia') }}
+                                        · {{ $draft->selections()->where('selected', true)->count() }} items selected
+                                    </p>
+                                </div>
+                                <span
+                                    class="text-xs font-medium px-2 py-0.5 rounded-full capitalize shrink-0"
+                                    style="background: var(--color-surface-input-border); color: var(--color-text-secondary);"
+                                >
+                                    {{ $draft->status }}
+                                </span>
+                            </div>
+                        </a>
+                    </li>
+                @endforeach
+            </ul>
+        @endif
+    </div>
 @endsection
