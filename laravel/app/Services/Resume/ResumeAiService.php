@@ -2,6 +2,7 @@
 
 namespace App\Services\Resume;
 
+use App\Enums\RequirementCategory;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
@@ -17,8 +18,8 @@ use Throwable;
  * config block — same provider, same billing, different purpose.
  *
  * Currently supports one operation:
- *   - analyzeRelevance: compare a catalog summary against a job listing
- *     and identify which entries are most relevant
+ *   - analyzeRelevance: extract requirements from a listing, produce
+ *     a strategy summary, and map catalog entries to requirements
  *
  * Future operations (5.3, 5.4):
  *   - generateDraft: produce a markdown resume from accepted selections
@@ -28,7 +29,7 @@ class ResumeAiService
 {
     private const API_BASE = 'https://api.anthropic.com';
     private const API_VERSION = '2023-06-01';
-    private const MAX_TOKENS = 4000;
+    private const MAX_TOKENS = 8000;
 
     public function __construct(
         private readonly string $apiKey,
@@ -38,9 +39,10 @@ class ResumeAiService
     ) {}
 
     /**
-     * Analyze which catalog entries are most relevant to a job listing.
-     * Returns structured suggestions the controller uses to populate
-     * resume_selections.
+     * Full resume analysis: extract requirements, produce strategy,
+     * and map catalog entries to requirements. Returns a structured
+     * RelevanceResult the controller uses to populate requirements,
+     * draft strategy, and selections.
      */
     public function analyzeRelevance(
         string $catalogSummary,
@@ -76,13 +78,15 @@ class ResumeAiService
 
         $body = $response->json();
         $text = $this->extractTextFromResponse($body);
-        $suggestions = $this->parseSuggestions($text);
+        $parsed = $this->parseStructuredResponse($text);
 
         $inputTokens = (int) ($body['usage']['input_tokens'] ?? 0);
         $outputTokens = (int) ($body['usage']['output_tokens'] ?? 0);
 
         return new RelevanceResult(
-            suggestions: $suggestions,
+            requirements: $parsed['requirements'],
+            strategySummary: $parsed['strategy_summary'],
+            selections: $parsed['selections'],
             inputTokens: $inputTokens,
             outputTokens: $outputTokens,
             costCents: $this->computeCost($inputTokens, $outputTokens),
@@ -112,39 +116,75 @@ class ResumeAiService
 
     private function relevanceSystemPrompt(): string
     {
-        return <<<'PROMPT'
-You are a career strategist helping a job applicant decide which parts of their work history to feature on a tailored resume. You will receive a job listing and the applicant's career catalog.
+        $categories = RequirementCategory::promptEnumString();
 
-Your task: identify which catalog entries are most relevant to the job listing. For each entry you suggest, explain WHY it's relevant — connect the entry's specifics to the listing's requirements, responsibilities, or nice-to-haves.
+        return <<<PROMPT
+You are a career strategist helping a job applicant build a tailored resume. You will receive a job listing and the applicant's career catalog.
 
-Return a JSON array of objects. Each object has:
+You must do three things:
+
+## 1. Extract requirements from the listing
+
+Parse the job listing into individual requirements. Each requirement is a specific thing the employer is looking for — a skill, a technology, years of experience, a responsibility, a domain expertise, etc.
+
+For each requirement, provide:
+- "ref": a short unique label you assign (e.g. "REQ-1", "REQ-2"). Used to link selections below.
+- "category": one of {$categories}
+- "title": short label (e.g. "Fraud detection systems", "5+ years Python", "Team leadership")
+- "description": the relevant sentence or context from the listing where this appeared. Keep it brief.
+- "section": which part of the listing this came from:
+  - "required" — hard requirements, must-haves
+  - "preferred" — nice-to-haves, bonus qualifications
+  - "responsibility" — day-to-day duties, what you'll be doing
+- "order": display order within the section (1 = first)
+
+Deduplicate where requirements overlap across sections. If a skill appears as both a requirement and a responsibility, keep the more specific one and note both contexts in the description.
+
+## 2. Produce a strategy summary
+
+Write 2-4 sentences describing the recommended narrative angle for this application. What makes this candidate a strong match? Which experiences should be the centerpiece? What story should the resume tell? Be specific — reference actual entries from the catalog and actual requirements from the listing.
+
+## 3. Map catalog entries to requirements
+
+For each requirement you extracted, identify which catalog entries best demonstrate that the candidate meets it. Focus on "this is evidence of X requirement" rather than generic relevance.
+
+For each selection, provide:
 - "type": one of "Position", "Project", "Accomplishment", "CareerTheme", "Tag", "Link"
 - "id": the numeric ID from the catalog (the number after the colon in brackets like [Position:42])
-- "reason": 1-2 sentences explaining why this entry strengthens the application. Be specific — reference the listing's requirements by name.
-- "order": integer for suggested display order within the type group (1 = most prominent)
+- "requirement_ref": the "ref" of the requirement this addresses (e.g. "REQ-1"). Use null for entries that strengthen the resume generally but don't map to a specific requirement.
+- "reason": 1-2 sentences explaining specifically HOW this entry demonstrates the requirement. Don't just say "relevant experience" — describe the connection. For example: "Led a team of 6 building a real-time fraud scoring engine, directly matching the listing's requirement for fraud detection system experience."
+- "order": display order within the requirement group (1 = most relevant)
 
 Selection guidelines:
-- Include ALL positions that are relevant to the role — these form the resume's backbone.
-- Under each relevant position, include the projects and accomplishments that best demonstrate fit for this specific role. Skip generic or weakly relevant items.
-- Prioritize accomplishments with high prominence scores and concrete impact metrics — these are the strongest resume bullets.
-- Include career themes that align with the listing's description of the role or team culture.
-- Include tags (skills) that directly match the listing's required or preferred qualifications.
-- Include links with is_personal_appearance = true that demonstrate relevant expertise (talks, articles, open source contributions).
-- Be selective. A focused resume with 3-5 strong positions and their best evidence beats a kitchen-sink approach. If an entry doesn't clearly strengthen the application, leave it out.
-- When in doubt, include the entry — the user can toggle it off. It's easier to remove than to realize something was missing.
+- A catalog entry CAN appear under multiple requirements if it genuinely demonstrates both.
+- Prioritize accomplishments with concrete impact metrics — these make the strongest resume bullets.
+- Include portfolio links (is_personal_appearance = true) where they provide tangible evidence of a requirement.
+- Be selective within each requirement. The 2-3 strongest pieces of evidence beat 10 weak ones.
+- Include career themes that align with the role's overall direction.
+- It's okay if some requirements have no matching catalog entries — that gap is useful information for the applicant. Don't force weak matches.
+- When in doubt, include the entry — the user can exclude it. It's easier to remove than to discover something was missing.
 
-Return only the JSON array. No preamble, no commentary, no code fences.
+## Response format
+
+Return a single JSON object with three keys. No preamble, no commentary, no code fences.
+
+{
+  "requirements": [...],
+  "strategy_summary": "...",
+  "selections": [...]
+}
 PROMPT;
     }
 
     /**
-     * Parse the AI's JSON response into a collection of suggestion
-     * arrays. Tolerant of code fences.
+     * Parse the AI's structured JSON response into requirements,
+     * strategy summary, and selections. Tolerant of code fences.
      */
-    private function parseSuggestions(string $text): Collection
+    private function parseStructuredResponse(string $text): array
     {
         $cleaned = trim($text);
 
+        // Strip code fences if present.
         if (str_starts_with($cleaned, '```')) {
             $cleaned = preg_replace('/^```(?:json)?\s*/', '', $cleaned);
             $cleaned = preg_replace('/```\s*$/', '', $cleaned);
@@ -160,15 +200,54 @@ PROMPT;
             );
         }
 
+        return [
+            'requirements' => $this->validateRequirements($parsed['requirements'] ?? []),
+            'strategy_summary' => (string) ($parsed['strategy_summary'] ?? ''),
+            'selections' => $this->validateSelections($parsed['selections'] ?? []),
+        ];
+    }
+
+    private function validateRequirements(array $raw): Collection
+    {
+        $validSections = ['required', 'preferred', 'responsibility'];
+        $validCategories = array_map(
+            fn (RequirementCategory $c) => $c->value,
+            RequirementCategory::cases(),
+        );
+
+        return collect($raw)
+            ->filter(fn (array $item) => isset($item['ref'], $item['title'])
+                && isset($item['category'], $item['section'])
+            )
+            ->map(fn (array $item) => [
+                'ref' => (string) $item['ref'],
+                'category' => in_array($item['category'], $validCategories, true)
+                    ? (string) $item['category']
+                    : 'other',
+                'title' => (string) $item['title'],
+                'description' => (string) ($item['description'] ?? ''),
+                'section' => in_array($item['section'], $validSections, true)
+                    ? (string) $item['section']
+                    : 'required',
+                'order' => (int) ($item['order'] ?? 0),
+            ])
+            ->values();
+    }
+
+    private function validateSelections(array $raw): Collection
+    {
         $validTypes = ['Position', 'Project', 'Accomplishment', 'CareerTheme', 'Tag', 'Link'];
 
-        return collect($parsed)
+        return collect($raw)
             ->filter(fn (array $item) => isset($item['type'], $item['id'])
                 && in_array($item['type'], $validTypes, true)
             )
             ->map(fn (array $item) => [
                 'type' => (string) $item['type'],
                 'id' => (int) $item['id'],
+                'requirement_ref' => isset($item['requirement_ref'])
+                    ? (string) $item['requirement_ref']
+                    : null,
                 'reason' => (string) ($item['reason'] ?? ''),
                 'order' => (int) ($item['order'] ?? 0),
             ])

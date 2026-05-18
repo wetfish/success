@@ -303,8 +303,8 @@ Route::resource('job-listings', JobListingController::class);
 
 /* Resume draft wizard routes.
  * Not a standard resource — the flow is: create (POST from job listing
- * page) → show (selection review) → toggle (AJAX) → confirm (POST).
- * Each route is named explicitly for clarity. */
+ * page) → show (selection review) → toggle/updateStrategy/updateNote
+ * (AJAX) → confirm (POST). Each route is named explicitly for clarity. */
 Route::post('job-listings/{job_listing}/resume-drafts', [ResumeDraftController::class, 'create'])
     ->name('resume-drafts.create');
 
@@ -313,6 +313,12 @@ Route::get('resume-drafts/{resume_draft}', [ResumeDraftController::class, 'show'
 
 Route::post('resume-drafts/{resume_draft}/selections/{selection}/toggle', [ResumeDraftController::class, 'toggle'])
     ->name('resume-drafts.toggle');
+
+Route::post('resume-drafts/{resume_draft}/strategy', [ResumeDraftController::class, 'updateStrategy'])
+    ->name('resume-drafts.update-strategy');
+
+Route::post('resume-drafts/{resume_draft}/selections/{selection}/note', [ResumeDraftController::class, 'updateNote'])
+    ->name('resume-drafts.update-note');
 
 Route::post('resume-drafts/{resume_draft}/confirm', [ResumeDraftController::class, 'confirm'])
     ->name('resume-drafts.confirm');

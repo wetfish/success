@@ -1,15 +1,12 @@
 /**
  * Selection review page behavior.
  *
- * Auto-mounts on every `[data-selection-review]` element. Each
- * selection card has Include and Exclude buttons — same pattern as
- * the tag review page. Clicking a button fires a POST to toggle
- * the `selected` boolean, then updates the card's visual state
- * (border tint, badge visibility, button disabled states).
+ * Three concerns:
+ *   1. Include/Exclude toggles on selection cards (existing)
+ *   2. Strategy summary save and revert (new)
+ *   3. Per-selection relevance note save (new)
  *
- * Counter and progress bar update on each action. Searches
- * `document` for counter elements since they live outside the
- * `[data-selection-review]` root.
+ * Auto-mounts on every `[data-selection-review]` element.
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -22,6 +19,8 @@ function initSelectionReview(root) {
     const totalCount = barFill ? parseInt(barFill.dataset.total, 10) : 0;
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
 
+    // ── Include / Exclude toggles ────────────────────────────
+
     root.addEventListener('click', (e) => {
         const actionBtn = e.target.closest('[data-action]');
         if (!actionBtn) return;
@@ -31,98 +30,166 @@ function initSelectionReview(root) {
 
         const action = actionBtn.dataset.action;
         if (action !== 'include' && action !== 'exclude') return;
-
-        // If the button is already disabled, this is the current state — no-op.
         if (actionBtn.disabled) return;
 
         e.preventDefault();
-        handleAction(card, action);
+        handleToggle(card, action);
     });
 
-    async function handleAction(card, action) {
+    async function handleToggle(card, action) {
         const url = card.dataset.toggleUrl;
         if (!url) return;
 
         const wasSelected = card.dataset.selected === 'true';
         const nowSelected = action === 'include';
-
-        // If clicking the same state, no-op.
         if (wasSelected === nowSelected) return;
 
-        // Optimistic UI.
-        applyState(card, nowSelected);
+        applyCardState(card, nowSelected);
         updateCounter(nowSelected ? 1 : -1);
 
         try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                    'X-CSRF-TOKEN': csrfToken || '',
-                },
-                credentials: 'same-origin',
-            });
-
-            if (!response.ok) {
-                throw new Error(`Toggle failed: ${response.status}`);
-            }
-
-            const data = await response.json();
-            if (!data.ok) {
-                throw new Error(data.error || 'Toggle failed');
-            }
-
-            // Confirm server state.
-            applyState(card, data.selected);
-
-            // Fix counter if optimistic guess was wrong.
-            if (data.selected !== nowSelected) {
-                updateCounter(data.selected ? 1 : -1);
-            }
-
+            const data = await postJson(url);
+            if (!data.ok) throw new Error(data.error || 'Toggle failed');
+            applyCardState(card, data.selected);
+            if (data.selected !== nowSelected) updateCounter(data.selected ? 1 : -1);
             hideError(card);
         } catch (err) {
-            console.warn('[selection-review] Toggle failed, reverting:', err);
-            applyState(card, wasSelected);
+            console.warn('[selection-review] Toggle failed:', err);
+            applyCardState(card, wasSelected);
             updateCounter(wasSelected ? 1 : -1);
             showError(card, 'Action failed — please try again.');
         }
     }
 
-    function applyState(card, isSelected) {
+    function applyCardState(card, isSelected) {
         card.dataset.selected = isSelected ? 'true' : 'false';
-
-        // Card border tint.
         card.classList.toggle('selection-card--included', isSelected);
         card.classList.toggle('selection-card--excluded', !isSelected);
 
-        // Button disabled states — the active state's button is disabled.
         const includeBtn = card.querySelector('[data-action="include"]');
         const excludeBtn = card.querySelector('[data-action="exclude"]');
         if (includeBtn) includeBtn.disabled = isSelected;
         if (excludeBtn) excludeBtn.disabled = !isSelected;
 
-        // Status badges.
         const includedBadge = card.querySelector('[data-selection-badge="included"]');
         const excludedBadge = card.querySelector('[data-selection-badge="excluded"]');
         if (includedBadge) includedBadge.hidden = !isSelected;
         if (excludedBadge) excludedBadge.hidden = isSelected;
     }
 
-    function showError(card, message) {
-        const errorEl = card.querySelector('[data-selection-error]');
-        if (errorEl) {
-            errorEl.textContent = message;
-            errorEl.hidden = false;
+    // ── Strategy summary ─────────────────────────────────────
+
+    const strategyEditor = root.querySelector('[data-strategy-editor]');
+    if (strategyEditor) {
+        const strategyUrl = strategyEditor.dataset.strategyUrl;
+        const originalText = strategyEditor.dataset.strategyOriginal;
+        const strategyInput = strategyEditor.querySelector('[data-strategy-input]');
+        const saveBtn = strategyEditor.querySelector('[data-strategy-save]');
+        const revertBtn = strategyEditor.querySelector('[data-strategy-revert]');
+        const statusEl = strategyEditor.querySelector('[data-strategy-status]');
+
+        saveBtn?.addEventListener('click', async () => {
+            const text = strategyInput.value.trim();
+            if (!text) return;
+
+            showStatus(statusEl, 'Saving…');
+            try {
+                const data = await postJson(strategyUrl, { strategy_summary: text });
+                if (!data.ok) throw new Error(data.error || 'Save failed');
+                showStatus(statusEl, 'Saved');
+                fadeStatus(statusEl);
+            } catch (err) {
+                console.warn('[selection-review] Strategy save failed:', err);
+                showStatus(statusEl, 'Save failed — try again');
+            }
+        });
+
+        revertBtn?.addEventListener('click', () => {
+            if (originalText !== undefined) {
+                strategyInput.value = originalText;
+                showStatus(statusEl, 'Reverted — click Save to confirm');
+            }
+        });
+    }
+
+    // ── Relevance notes ──────────────────────────────────────
+
+    root.addEventListener('click', (e) => {
+        const saveBtn = e.target.closest('[data-note-save]');
+        if (!saveBtn) return;
+
+        const card = saveBtn.closest('[data-selection-card]');
+        if (!card) return;
+
+        e.preventDefault();
+        handleNoteSave(card);
+    });
+
+    async function handleNoteSave(card) {
+        const url = card.dataset.noteUrl;
+        if (!url) return;
+
+        const noteInput = card.querySelector('[data-note-input]');
+        const statusEl = card.querySelector('[data-note-status]');
+        if (!noteInput) return;
+
+        const text = noteInput.value.trim() || null;
+        showStatus(statusEl, 'Saving…');
+
+        try {
+            const data = await postJson(url, { user_relevance_note: text });
+            if (!data.ok) throw new Error(data.error || 'Save failed');
+            showStatus(statusEl, 'Saved');
+            fadeStatus(statusEl);
+        } catch (err) {
+            console.warn('[selection-review] Note save failed:', err);
+            showStatus(statusEl, 'Save failed — try again');
         }
     }
 
-    function hideError(card) {
-        const errorEl = card.querySelector('[data-selection-error]');
-        if (errorEl) {
-            errorEl.hidden = true;
+    // ── Shared helpers ───────────────────────────────────────
+
+    async function postJson(url, body = null) {
+        const options = {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': csrfToken || '',
+            },
+            credentials: 'same-origin',
+        };
+
+        if (body !== null) {
+            options.body = JSON.stringify(body);
         }
+
+        const response = await fetch(url, options);
+        if (!response.ok) {
+            throw new Error(`Request failed: ${response.status}`);
+        }
+        return response.json();
+    }
+
+    function showError(card, message) {
+        const el = card.querySelector('[data-selection-error]');
+        if (el) { el.textContent = message; el.hidden = false; }
+    }
+
+    function hideError(card) {
+        const el = card.querySelector('[data-selection-error]');
+        if (el) el.hidden = true;
+    }
+
+    function showStatus(el, text) {
+        if (!el) return;
+        el.textContent = text;
+        el.hidden = false;
+    }
+
+    function fadeStatus(el, delay = 2000) {
+        if (!el) return;
+        setTimeout(() => { el.hidden = true; }, delay);
     }
 
     function updateCounter(delta) {
@@ -132,8 +199,7 @@ function initSelectionReview(root) {
         countEl.textContent = next;
 
         if (barFill && totalCount > 0) {
-            const pct = Math.round((next / totalCount) * 100);
-            barFill.style.width = `${pct}%`;
+            barFill.style.width = `${Math.round((next / totalCount) * 100)}%`;
         }
     }
 }
