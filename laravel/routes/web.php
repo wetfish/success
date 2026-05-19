@@ -332,6 +332,9 @@ Route::get('resume-drafts/{resume_draft}', [ResumeDraftController::class, 'show'
 Route::post('resume-drafts/{resume_draft}/strategy', [ResumeDraftController::class, 'updateStrategy'])
     ->name('resume-drafts.update-strategy');
 
+Route::post('resume-drafts/{resume_draft}/strategy/synthesize', [ResumeDraftController::class, 'synthesizeStrategy'])
+    ->name('resume-drafts.synthesize-strategy');
+
 Route::post('resume-drafts/{resume_draft}/requirements/{requirement}/decide', [ResumeDraftController::class, 'decideRequirement'])
     ->name('resume-drafts.decide-requirement');
 

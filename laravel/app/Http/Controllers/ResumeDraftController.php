@@ -8,6 +8,8 @@ use App\Models\ResumeDraft;
 use App\Models\ResumeSelection;
 use App\Models\SourceDocument;
 use App\Services\AiUsageTracker;
+use App\Services\Extraction\ExtractionException;
+use App\Services\Extraction\ExtractionProvider;
 use App\Services\Resume\CatalogSummarizer;
 use App\Services\Resume\ResumeAiService;
 use Illuminate\Http\JsonResponse;
@@ -224,6 +226,59 @@ class ResumeDraftController extends Controller
         $resumeDraft->update(['strategy_summary' => $validated['strategy_summary']]);
 
         return response()->json(['ok' => true]);
+    }
+
+    /**
+     * AJAX: synthesize the AI-generated strategy with the user's
+     * own framing. Uses the same ExtractionProvider::synthesize()
+     * as the merge UI — takes two text values and produces a
+     * combined result via AI.
+     *
+     * The user types their own strategy description (informed by
+     * the requirements they can now see), then clicks Synthesize
+     * to merge it with the AI's generated version. This addresses
+     * the gap where the AI's strategy is limited by what's in the
+     * catalog — the user brings context the AI doesn't have.
+     */
+    public function synthesizeStrategy(
+        ResumeDraft $resumeDraft,
+        Request $request,
+        ExtractionProvider $provider,
+        AiUsageTracker $tracker,
+    ): JsonResponse {
+        if (! $resumeDraft->isSelecting()) {
+            return response()->json(['error' => 'Strategy is locked — this draft has already been confirmed.'], 422);
+        }
+
+        $validated = $request->validate([
+            'ai_strategy' => ['present', 'nullable', 'string'],
+            'user_strategy' => ['present', 'nullable', 'string'],
+        ]);
+
+        try {
+            $result = $provider->synthesize(
+                $validated['ai_strategy'] ?? '',
+                $validated['user_strategy'] ?? '',
+            );
+        } catch (ExtractionException $e) {
+            $tracker->recordFailure(
+                provider: $provider->name(),
+                model: 'unknown',
+                operation: 'synthesize',
+                errorMessage: $e->getMessage(),
+            );
+
+            return response()->json([
+                'error' => 'Synthesis failed — try again, or edit the strategy manually.',
+            ], 502);
+        }
+
+        $tracker->recordSynthesis($result, $provider->name());
+
+        return response()->json([
+            'ok' => true,
+            'synthesized' => $result->description,
+        ]);
     }
 
     /**

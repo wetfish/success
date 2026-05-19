@@ -156,10 +156,12 @@ function initRequirementTriage(root) {
     const strategyEditor = root.querySelector('[data-strategy-editor]');
     if (strategyEditor) {
         const strategyUrl = strategyEditor.dataset.strategyUrl;
+        const synthesizeUrl = strategyEditor.dataset.strategySynthesizeUrl;
         const originalText = strategyEditor.dataset.strategyOriginal;
         const strategyInput = strategyEditor.querySelector('[data-strategy-input]');
         const saveBtn = strategyEditor.querySelector('[data-strategy-save]');
         const revertBtn = strategyEditor.querySelector('[data-strategy-revert]');
+        const synthesizeBtn = strategyEditor.querySelector('[data-strategy-synthesize]');
         const statusEl = strategyEditor.querySelector('[data-strategy-status]');
 
         saveBtn?.addEventListener('click', async () => {
@@ -182,6 +184,30 @@ function initRequirementTriage(root) {
             if (originalText !== undefined) {
                 strategyInput.value = originalText;
                 showStatus(statusEl, 'Reverted — click Save to confirm');
+            }
+        });
+
+        synthesizeBtn?.addEventListener('click', async () => {
+            const userText = strategyInput.value.trim();
+            if (!userText && !originalText) return;
+
+            synthesizeBtn.disabled = true;
+            showStatus(statusEl, 'Synthesizing…');
+
+            try {
+                const data = await postJson(synthesizeUrl, {
+                    ai_strategy: originalText || '',
+                    user_strategy: userText || '',
+                });
+                if (!data.ok) throw new Error(data.error || 'Synthesis failed');
+
+                strategyInput.value = data.synthesized;
+                showStatus(statusEl, 'Synthesized — review and click Save to keep');
+            } catch (err) {
+                console.warn('[requirement-triage] Strategy synthesis failed:', err);
+                showStatus(statusEl, 'Synthesis failed — try again');
+            } finally {
+                synthesizeBtn.disabled = false;
             }
         });
     }

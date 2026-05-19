@@ -52,6 +52,7 @@
                 <div
                     data-strategy-editor
                     data-strategy-url="{{ route('resume-drafts.update-strategy', $draft) }}"
+                    data-strategy-synthesize-url="{{ route('resume-drafts.synthesize-strategy', $draft) }}"
                     data-strategy-original="{{ $draft->strategy_summary_generated }}"
                 >
                     <textarea
@@ -59,9 +60,12 @@
                         rows="4"
                         data-strategy-input
                     >{{ $draft->strategy_summary }}</textarea>
-                    <div class="flex items-center gap-3 mt-2">
+                    <div class="flex items-center gap-3 mt-2 flex-wrap">
                         <button type="button" class="btn-secondary text-sm" data-strategy-save>
                             Save strategy
+                        </button>
+                        <button type="button" class="btn-secondary text-sm" data-strategy-synthesize>
+                            Synthesize with AI
                         </button>
                         <button type="button" class="link-subtle text-xs" data-strategy-revert>
                             Revert to original
@@ -73,6 +77,9 @@
                             hidden
                         ></span>
                     </div>
+                    <p class="text-xs mt-2" style="color: var(--color-text-muted);">
+                        Write your own strategy and click "Synthesize with AI" to combine it with the AI's recommendation.
+                    </p>
                 </div>
             @else
                 <div
