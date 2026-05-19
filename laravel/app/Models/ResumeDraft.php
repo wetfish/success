@@ -25,6 +25,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'job_listing_id',
     'strategy_summary_generated',
     'strategy_summary',
+    'requirement_decisions',
     'generated_content',
     'user_content',
     'format_preference',
@@ -41,6 +42,7 @@ class ResumeDraft extends Model
     protected function casts(): array
     {
         return [
+            'requirement_decisions' => 'array',
             'generated_content' => 'string',
             'user_content' => 'string',
         ];
