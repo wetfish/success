@@ -1,0 +1,22 @@
+/* Requirement triage card styles. Same pattern as selection-review:
+ * border tint indicates the current decision. Accepted gets the
+ * accent border, rejected gets muted and lowered opacity. */
+
+ @layer components {
+    .triage-card {
+        border: 1px solid var(--color-surface-input-border);
+        background: var(--color-surface-input);
+        border-radius: 0.5rem;
+        padding: 1rem;
+        transition: border-color 200ms ease, opacity 200ms ease;
+    }
+
+    .triage-card--accepted {
+        border-color: var(--color-accent);
+    }
+
+    .triage-card--rejected {
+        border-color: rgb(148 163 184 / 0.4);
+        opacity: 0.6;
+    }
+}

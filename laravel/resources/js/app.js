@@ -6,3 +6,4 @@ import './tag-review';
 import './people-review';
 import './link-review';
 import './selection-review';
+import './requirement-triage';
