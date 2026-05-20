@@ -76,6 +76,7 @@
             <textarea
                 class="input text-sm"
                 rows="2"
+                style="overflow: hidden; resize: none;"
                 placeholder="Describe how this experience is relevant to this specific requirement…"
                 data-note-input
             >{{ $selection->user_relevance_note }}</textarea>

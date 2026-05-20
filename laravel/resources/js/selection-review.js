@@ -112,14 +112,26 @@ function initSelectionReview(root) {
         });
     }
 
-    // ── Relevance notes (auto-save on debounce) ─────────────
+    // ── Relevance notes (auto-save + auto-resize) ──────────
 
     const NOTE_DEBOUNCE_MS = 800;
     const noteTimers = new Map();
 
+    // Auto-resize: fit textarea height to content. Called on
+    // input and once on mount for pre-populated notes.
+    function autoResize(textarea) {
+        textarea.style.height = 'auto';
+        textarea.style.height = textarea.scrollHeight + 'px';
+    }
+
+    // Mount: auto-resize any pre-populated note textareas.
+    root.querySelectorAll('[data-note-input]').forEach(autoResize);
+
     root.addEventListener('input', (e) => {
         const noteInput = e.target.closest('[data-note-input]');
         if (!noteInput) return;
+
+        autoResize(noteInput);
 
         const card = noteInput.closest('[data-selection-card]');
         if (!card) return;
