@@ -79,17 +79,12 @@
                 placeholder="Describe how this experience is relevant to this specific requirement…"
                 data-note-input
             >{{ $selection->user_relevance_note }}</textarea>
-            <div class="flex items-center gap-2 mt-1">
-                <button type="button" class="link-subtle text-xs" data-note-save>
-                    Save note
-                </button>
-                <span
-                    class="text-xs"
-                    style="color: var(--color-text-muted);"
-                    data-note-status
-                    hidden
-                ></span>
-            </div>
+            <span
+                class="text-xs mt-1 block"
+                style="color: var(--color-text-muted);"
+                data-note-status
+                hidden
+            ></span>
         </div>
     @elseif ($selection->user_relevance_note)
         <p class="text-sm mb-3 leading-relaxed" style="color: var(--color-text-secondary);">

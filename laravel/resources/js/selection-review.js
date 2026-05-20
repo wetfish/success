@@ -112,17 +112,31 @@ function initSelectionReview(root) {
         });
     }
 
-    // ── Relevance notes ──────────────────────────────────────
+    // ── Relevance notes (auto-save on debounce) ─────────────
 
-    root.addEventListener('click', (e) => {
-        const saveBtn = e.target.closest('[data-note-save]');
-        if (!saveBtn) return;
+    const NOTE_DEBOUNCE_MS = 800;
+    const noteTimers = new Map();
 
-        const card = saveBtn.closest('[data-selection-card]');
+    root.addEventListener('input', (e) => {
+        const noteInput = e.target.closest('[data-note-input]');
+        if (!noteInput) return;
+
+        const card = noteInput.closest('[data-selection-card]');
         if (!card) return;
 
-        e.preventDefault();
-        handleNoteSave(card);
+        const selectionId = card.dataset.selectionId;
+        const statusEl = card.querySelector('[data-note-status]');
+        showStatus(statusEl, 'Typing…');
+
+        // Clear any pending save for this card.
+        if (noteTimers.has(selectionId)) {
+            clearTimeout(noteTimers.get(selectionId));
+        }
+
+        noteTimers.set(selectionId, setTimeout(() => {
+            noteTimers.delete(selectionId);
+            handleNoteSave(card);
+        }, NOTE_DEBOUNCE_MS));
     });
 
     async function handleNoteSave(card) {

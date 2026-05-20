@@ -3,6 +3,7 @@
 @section('title', ($sourceDocument->title ?: 'Untitled document') . ' — Success')
 
 @section('content')
+    @include('partials._resume-wizard-banner')
     <div class="mb-2">
         <a href="{{ route('career-input.index') }}" class="link-subtle text-sm">
             ← Career Input
