@@ -82,9 +82,8 @@
             >{{ $selection->user_relevance_note }}</textarea>
             <span
                 class="text-xs mt-1 block"
-                style="color: var(--color-text-muted);"
+                style="color: var(--color-text-muted); min-height: 1rem;"
                 data-note-status
-                hidden
             ></span>
         </div>
     @elseif ($selection->user_relevance_note)

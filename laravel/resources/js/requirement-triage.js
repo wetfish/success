@@ -249,11 +249,10 @@ function initRequirementTriage(root) {
     function showStatus(el, text) {
         if (!el) return;
         el.textContent = text;
-        el.hidden = false;
     }
 
     function fadeStatus(el, delay = 2000) {
         if (!el) return;
-        setTimeout(() => { el.hidden = true; }, delay);
+        setTimeout(() => { el.textContent = ''; }, delay);
     }
 }

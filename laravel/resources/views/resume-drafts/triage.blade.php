@@ -72,9 +72,8 @@
                         </button>
                         <span
                             class="text-xs"
-                            style="color: var(--color-text-muted);"
+                            style="color: var(--color-text-muted); min-height: 1rem; display: inline-block;"
                             data-strategy-status
-                            hidden
                         ></span>
                     </div>
                     <p class="text-xs mt-2" style="color: var(--color-text-muted);">
