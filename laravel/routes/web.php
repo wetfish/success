@@ -325,6 +325,12 @@ Route::resource('job-listings', JobListingController::class);
 Route::post('job-listings/{job_listing}/resume-drafts', [ResumeDraftController::class, 'create'])
     ->name('resume-drafts.create');
 
+// Catalog search for adding entries to requirements on Screen 2.
+// Registered before the {resume_draft} show route so "catalog-search"
+// isn't captured as a resume_draft ID.
+Route::get('resume-drafts/catalog-search', [ResumeDraftController::class, 'catalogSearch'])
+    ->name('resume-drafts.catalog-search');
+
 // Screen 1: Strategy & requirements triage.
 Route::get('resume-drafts/{resume_draft}', [ResumeDraftController::class, 'show'])
     ->name('resume-drafts.show');

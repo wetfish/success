@@ -139,12 +139,52 @@
             @endif
         </section>
 
+        {{-- Search your catalog —  add existing entries --}}
+        <section class="mb-8">
+            <h3 class="metadata-label mb-2">Search your catalog</h3>
+            <p class="text-xs mb-3" style="color: var(--color-text-muted);">
+                Find existing organizations, positions, projects, or accomplishments to add to this requirement.
+            </p>
+
+            <div
+                class="catalog-picker"
+                data-catalog-picker
+                data-search-url="{{ route('resume-drafts.catalog-search') }}"
+            >
+                <input
+                    type="text"
+                    class="input text-sm"
+                    placeholder="Search by name or title…"
+                    autocomplete="off"
+                    data-catalog-picker-input
+                    aria-expanded="false"
+                >
+                <ul
+                    class="catalog-picker-dropdown"
+                    role="listbox"
+                    data-catalog-picker-dropdown
+                    hidden
+                ></ul>
+
+                {{-- Hidden form — submitted when a result is selected --}}
+                <form
+                    method="POST"
+                    action="{{ route('resume-drafts.add-selection', [$draft, $requirement]) }}"
+                    data-catalog-picker-form
+                >
+                    @csrf
+                    <input type="hidden" name="selectable_type" value="">
+                    <input type="hidden" name="selectable_id" value="">
+                </form>
+            </div>
+        </section>
+
         {{-- Add new experience — freeform text --}}
         <section class="mb-8">
             <h3 class="metadata-label mb-2">Add new experience</h3>
             <p class="text-xs mb-3" style="color: var(--color-text-muted);">
-                Describe any experience related to this requirement that isn't in your catalog yet.
-                This will be saved and can be processed through the extraction pipeline to add structured entries to your catalog.
+                Describe experience related to this requirement that isn't in your catalog yet.
+                This will create a new document and take you through the extraction review to add structured entries.
             </p>
 
             <form

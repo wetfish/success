@@ -323,6 +323,75 @@ class ResumeDraftController extends Controller
     // -----------------------------------------------------------------
 
     /**
+     * JSON: search across catalog entities for the picker on Screen 2.
+     * Searches organizations, positions, projects, and accomplishments
+     * by name/title. Returns a flat list with type slugs matching
+     * SELECTABLE_TYPES so the picker can submit directly to addSelection.
+     */
+    public function catalogSearch(Request $request): JsonResponse
+    {
+        $query = trim((string) $request->query('q', ''));
+
+        if ($query === '') {
+            return response()->json([]);
+        }
+
+        $like = '%' . addcslashes($query, '%_\\') . '%';
+        $results = collect();
+
+        // Organizations — search by name.
+        $orgs = \App\Models\Organization::where('name', 'LIKE', $like)
+            ->take(3)->get()
+            ->map(fn ($o) => [
+                'id' => $o->id,
+                'type' => 'organization',
+                'name' => $o->name,
+                'context' => str_replace('_', ' ', $o->type),
+            ]);
+        $results = $results->merge($orgs);
+
+        // Positions — search by title, include org name as context.
+        $positions = \App\Models\Position::with('organization')
+            ->where('title', 'LIKE', $like)
+            ->take(3)->get()
+            ->map(fn ($p) => [
+                'id' => $p->id,
+                'type' => 'position',
+                'name' => $p->title . ' at ' . ($p->organization?->name ?? 'Unknown'),
+                'context' => implode(' · ', array_filter([
+                    $p->start_date?->format('M Y'),
+                    $p->end_date ? $p->end_date->format('M Y') : 'Present',
+                ])),
+            ]);
+        $results = $results->merge($positions);
+
+        // Projects — search by name.
+        $projects = \App\Models\Project::with('organization')
+            ->where('name', 'LIKE', $like)
+            ->take(3)->get()
+            ->map(fn ($p) => [
+                'id' => $p->id,
+                'type' => 'project',
+                'name' => $p->name,
+                'context' => $p->organization?->name ?? '',
+            ]);
+        $results = $results->merge($projects);
+
+        // Accomplishments — search by title.
+        $accomplishments = \App\Models\Accomplishment::where('title', 'LIKE', $like)
+            ->take(3)->get()
+            ->map(fn ($a) => [
+                'id' => $a->id,
+                'type' => 'accomplishment',
+                'name' => $a->title,
+                'context' => $a->description ? \Illuminate\Support\Str::limit($a->description, 80) : '',
+            ]);
+        $results = $results->merge($accomplishments);
+
+        return response()->json($results->take(8)->values()->all());
+    }
+
+    /**
      * Screen 2: Per-requirement review. One requirement per page.
      * Shows the requirement header, AI-suggested selections with
      * include/exclude buttons, and a freeform text input for adding
@@ -488,9 +557,14 @@ class ResumeDraftController extends Controller
 
     /**
      * Submit freeform experience text for a requirement. Creates a
-     * source document with origin tracking, ready for the extraction
-     * pipeline. In Slice 5 this will trigger extraction in a modal;
-     * for now it creates the document and redirects back.
+     * source document with origin tracking, then redirects to the
+     * extraction preview page where the user can review the cost
+     * estimate and run extraction. After extraction and review,
+     * the user navigates back to the resume wizard.
+     *
+     * The modal version (keeping the user in the wizard context)
+     * is a future enhancement. For now, the existing extraction
+     * pipeline handles the heavy lifting.
      */
     public function submitExperience(
         ResumeDraft $resumeDraft,
@@ -509,7 +583,7 @@ class ResumeDraftController extends Controller
             'experience_text' => ['required', 'string', 'max:10000'],
         ]);
 
-        SourceDocument::create([
+        $document = SourceDocument::create([
             'title' => 'Experience for: ' . $requirement->title,
             'kind' => 'other',
             'origin' => 'requirement_response',
@@ -517,11 +591,7 @@ class ResumeDraftController extends Controller
             'body' => $validated['experience_text'],
         ]);
 
-        // TODO (Slice 5): Trigger extraction pipeline and open modal.
-        // For now, redirect back with a status message.
-        return redirect()
-            ->route('resume-drafts.requirement', [$resumeDraft, $requirement])
-            ->with('status', 'Experience saved — extraction and review will be available in the next update.');
+        return redirect()->route('source-documents.preview', $document);
     }
 
     // -----------------------------------------------------------------

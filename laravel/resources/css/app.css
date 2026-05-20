@@ -12,6 +12,7 @@
 @import './components/org-picker.css';
 @import './components/selection-review.css';
 @import './components/requirement-triage.css';
+@import './components/catalog-picker.css';
 
 @theme {
     --font-sans: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',

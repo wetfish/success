@@ -7,3 +7,4 @@ import './people-review';
 import './link-review';
 import './selection-review';
 import './requirement-triage';
+import './catalog-picker';
