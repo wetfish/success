@@ -11,6 +11,8 @@ use App\Models\Project;
 use App\Models\ResumeDraft;
 use App\Models\ResumeSelection;
 use App\Models\SourceDocument;
+use App\Services\Resume\DraftResult;
+use App\Services\Resume\ResumeAiService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
@@ -18,8 +20,9 @@ use Tests\TestCase;
 /**
  * Feature tests for the resume draft wizard HTTP flow. Covers
  * routing, redirects, validation, and state transitions across
- * all three screens. Does NOT test the AI service — those calls
- * are mocked or bypassed by creating records directly.
+ * all screens and the editing phase. Does NOT test the AI service
+ * directly — those calls are mocked or bypassed by creating
+ * records directly.
  */
 class ResumeDraftWizardTest extends TestCase
 {
@@ -84,6 +87,47 @@ class ResumeDraftWizardTest extends TestCase
                 'display_order' => 0,
             ]);
         }
+
+        return $draft;
+    }
+
+    /**
+     * Bind a mock ResumeAiService that returns a canned DraftResult.
+     * Used by confirm tests since confirm now triggers generation.
+     */
+    private function mockGenerateDraft(string $markdown = '# Test Resume'): void
+    {
+        $mock = $this->mock(ResumeAiService::class);
+        $mock->shouldReceive('generateDraft')
+            ->andReturn(new DraftResult(
+                markdown: $markdown,
+                inputTokens: 100,
+                outputTokens: 200,
+                costCents: 1,
+                model: 'test-model',
+            ));
+    }
+
+    /**
+     * Create a draft already in `editing` status with generated content.
+     */
+    private function makeDraftInEditing(
+        JobListing $listing,
+        array $requirements,
+    ): ResumeDraft {
+        $draft = $this->makeDraftWithSelections($listing, $requirements);
+
+        $decisions = [];
+        foreach ($requirements as $req) {
+            $decisions[$req->id] = 'accepted';
+        }
+
+        $draft->update([
+            'requirement_decisions' => $decisions,
+            'generated_content' => '# AI Generated Resume',
+            'user_content' => '# AI Generated Resume',
+            'status' => 'editing',
+        ]);
 
         return $draft;
     }
@@ -451,14 +495,19 @@ class ResumeDraftWizardTest extends TestCase
     #[Test]
     public function confirm_advances_status(): void
     {
+        $this->mockGenerateDraft();
+
         [$listing, $requirements] = $this->makeListingWithRequirements(1);
         $draft = $this->makeDraftWithSelections($listing, $requirements);
         $draft->update(['requirement_decisions' => [$requirements[0]->id => 'accepted']]);
 
         $response = $this->post(route('resume-drafts.confirm', $draft));
 
-        $response->assertRedirect();
-        $this->assertEquals('drafting', $draft->fresh()->status);
+        $response->assertRedirect(route('resume-drafts.edit', $draft));
+        $fresh = $draft->fresh();
+        $this->assertEquals('editing', $fresh->status);
+        $this->assertNotNull($fresh->generated_content);
+        $this->assertNotNull($fresh->user_content);
     }
 
     #[Test]
@@ -492,6 +541,8 @@ class ResumeDraftWizardTest extends TestCase
     #[Test]
     public function confirm_counts_duplicate_selections(): void
     {
+        $this->mockGenerateDraft();
+
         [$listing, $requirements] = $this->makeListingWithRequirements(2);
         $draft = $this->makeDraftWithSelections($listing, $requirements);
 
@@ -509,7 +560,7 @@ class ResumeDraftWizardTest extends TestCase
         $response = $this->post(route('resume-drafts.confirm', $draft));
 
         $response->assertRedirect();
-        $this->assertEquals('drafting', $draft->fresh()->status);
+        $this->assertEquals('editing', $draft->fresh()->status);
     }
 
     // -----------------------------------------------------------------
@@ -577,5 +628,183 @@ class ResumeDraftWizardTest extends TestCase
 
         $response->assertOk();
         $this->assertEmpty($response->json());
+    }
+
+    // -----------------------------------------------------------------
+    // Status routing (show)
+    // -----------------------------------------------------------------
+
+    #[Test]
+    public function show_redirects_editing_to_edit(): void
+    {
+        [$listing, $requirements] = $this->makeListingWithRequirements(1);
+        $draft = $this->makeDraftInEditing($listing, $requirements);
+
+        $response = $this->get(route('resume-drafts.show', $draft));
+
+        $response->assertRedirect(route('resume-drafts.edit', $draft));
+    }
+
+    #[Test]
+    public function show_redirects_approved_to_edit(): void
+    {
+        [$listing, $requirements] = $this->makeListingWithRequirements(1);
+        $draft = $this->makeDraftInEditing($listing, $requirements);
+        $draft->update(['status' => 'approved']);
+
+        $response = $this->get(route('resume-drafts.show', $draft));
+
+        $response->assertRedirect(route('resume-drafts.edit', $draft));
+    }
+
+    #[Test]
+    public function show_recovers_stale_drafting_status(): void
+    {
+        [$listing, $requirements] = $this->makeListingWithRequirements(1);
+        $draft = $this->makeDraftWithSelections($listing, $requirements);
+        $draft->update([
+            'requirement_decisions' => [$requirements[0]->id => 'accepted'],
+            'status' => 'drafting',
+        ]);
+
+        $response = $this->get(route('resume-drafts.show', $draft));
+
+        // Should reset to selecting and render triage.
+        $response->assertOk();
+        $this->assertEquals('selecting', $draft->fresh()->status);
+    }
+
+    // -----------------------------------------------------------------
+    // Editing phase
+    // -----------------------------------------------------------------
+
+    #[Test]
+    public function edit_renders_for_editing_status(): void
+    {
+        [$listing, $requirements] = $this->makeListingWithRequirements(1);
+        $draft = $this->makeDraftInEditing($listing, $requirements);
+
+        $response = $this->get(route('resume-drafts.edit', $draft));
+
+        $response->assertOk();
+        $response->assertSee('Edit resume draft');
+    }
+
+    #[Test]
+    public function edit_renders_for_approved_status(): void
+    {
+        [$listing, $requirements] = $this->makeListingWithRequirements(1);
+        $draft = $this->makeDraftInEditing($listing, $requirements);
+        $draft->update(['status' => 'approved']);
+
+        $response = $this->get(route('resume-drafts.edit', $draft));
+
+        $response->assertOk();
+        $response->assertSee('Approved draft');
+    }
+
+    #[Test]
+    public function edit_redirects_selecting_to_show(): void
+    {
+        [$listing, $requirements] = $this->makeListingWithRequirements(1);
+        $draft = $this->makeDraftWithSelections($listing, $requirements);
+
+        $response = $this->get(route('resume-drafts.edit', $draft));
+
+        $response->assertRedirect(route('resume-drafts.show', $draft));
+    }
+
+    #[Test]
+    public function update_content_saves(): void
+    {
+        [$listing, $requirements] = $this->makeListingWithRequirements(1);
+        $draft = $this->makeDraftInEditing($listing, $requirements);
+
+        $response = $this->post(route('resume-drafts.update-content', $draft), [
+            'user_content' => '# Edited Resume',
+        ]);
+
+        $response->assertRedirect(route('resume-drafts.edit', $draft));
+        $this->assertEquals('# Edited Resume', $draft->fresh()->user_content);
+    }
+
+    #[Test]
+    public function update_content_rejects_non_editing(): void
+    {
+        [$listing, $requirements] = $this->makeListingWithRequirements(1);
+        $draft = $this->makeDraftInEditing($listing, $requirements);
+        $draft->update(['status' => 'approved']);
+
+        $response = $this->post(route('resume-drafts.update-content', $draft), [
+            'user_content' => '# Should Not Save',
+        ]);
+
+        $response->assertRedirect();
+        $this->assertNotEquals('# Should Not Save', $draft->fresh()->user_content);
+    }
+
+    #[Test]
+    public function revert_restores_generated_content(): void
+    {
+        [$listing, $requirements] = $this->makeListingWithRequirements(1);
+        $draft = $this->makeDraftInEditing($listing, $requirements);
+        $draft->update(['user_content' => '# User Edits']);
+
+        $response = $this->post(route('resume-drafts.revert', $draft));
+
+        $response->assertRedirect(route('resume-drafts.edit', $draft));
+        $this->assertEquals('# AI Generated Resume', $draft->fresh()->user_content);
+    }
+
+    #[Test]
+    public function approve_advances_to_approved(): void
+    {
+        [$listing, $requirements] = $this->makeListingWithRequirements(1);
+        $draft = $this->makeDraftInEditing($listing, $requirements);
+
+        $response = $this->post(route('resume-drafts.approve', $draft));
+
+        $response->assertRedirect(route('resume-drafts.edit', $draft));
+        $this->assertEquals('approved', $draft->fresh()->status);
+    }
+
+    #[Test]
+    public function approve_rejects_non_editing(): void
+    {
+        [$listing, $requirements] = $this->makeListingWithRequirements(1);
+        $draft = $this->makeDraftWithSelections($listing, $requirements);
+
+        $response = $this->post(route('resume-drafts.approve', $draft));
+
+        $response->assertRedirect();
+        $this->assertEquals('selecting', $draft->fresh()->status);
+    }
+
+    #[Test]
+    public function revise_selections_resets_to_selecting(): void
+    {
+        [$listing, $requirements] = $this->makeListingWithRequirements(1);
+        $draft = $this->makeDraftInEditing($listing, $requirements);
+
+        $response = $this->post(route('resume-drafts.revise-selections', $draft));
+
+        $response->assertRedirect(route('resume-drafts.show', $draft));
+        $fresh = $draft->fresh();
+        $this->assertEquals('selecting', $fresh->status);
+        $this->assertNull($fresh->generated_content);
+        $this->assertNull($fresh->user_content);
+    }
+
+    #[Test]
+    public function revise_selections_works_from_approved(): void
+    {
+        [$listing, $requirements] = $this->makeListingWithRequirements(1);
+        $draft = $this->makeDraftInEditing($listing, $requirements);
+        $draft->update(['status' => 'approved']);
+
+        $response = $this->post(route('resume-drafts.revise-selections', $draft));
+
+        $response->assertRedirect(route('resume-drafts.show', $draft));
+        $this->assertEquals('selecting', $draft->fresh()->status);
     }
 }
