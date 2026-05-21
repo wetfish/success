@@ -154,7 +154,36 @@
         </div>
     @endif
 
-    {{-- Modal controller — handles revert and approve confirmation dialogs --}}
+    {{-- Revise selections — available in both editing and approved states --}}
+    <div class="mt-6">
+        <button
+            type="button"
+            class="link-subtle text-sm"
+            data-revise-trigger
+        >
+            ← Revise selections and regenerate
+        </button>
+    </div>
+
+    {{-- Revise selections confirmation modal --}}
+    <div class="modal-overlay" data-revise-modal inert>
+        <div class="modal-backdrop" data-revise-backdrop aria-hidden="true"></div>
+        <div class="modal-panel">
+            <h3 class="modal-title">Revise selections?</h3>
+            <p class="modal-message">
+                This will discard the generated draft and return you to the selection wizard. Your requirement decisions, catalog selections, and relevance notes are preserved — you can adjust them and regenerate.
+            </p>
+            <div class="modal-actions">
+                <button type="button" class="btn-secondary" data-revise-cancel>Cancel</button>
+                <form method="POST" action="{{ route('resume-drafts.revise-selections', $draft) }}">
+                    @csrf
+                    <button type="submit" class="btn-destructive">Discard draft & revise</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    {{-- Modal controller — handles revert, approve, and revise confirmation dialogs --}}
     <script>
         (function () {
             function setupModal(triggerAttr, modalAttr, backdropAttr, cancelAttr) {
@@ -191,6 +220,7 @@
 
             setupModal('data-revert-trigger', 'data-revert-modal', 'data-revert-backdrop', 'data-revert-cancel');
             setupModal('data-approve-trigger', 'data-approve-modal', 'data-approve-backdrop', 'data-approve-cancel');
+            setupModal('data-revise-trigger', 'data-revise-modal', 'data-revise-backdrop', 'data-revise-cancel');
         })();
     </script>
 @endsection

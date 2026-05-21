@@ -326,6 +326,7 @@ Route::resource('job-listings', JobListingController::class);
  *     POST /resume-drafts/{draft}/content                    → updateContent (save edits)
  *     POST /resume-drafts/{draft}/revert                     → revert to AI original
  *     POST /resume-drafts/{draft}/approve                    → approve (advance status)
+ *     POST /resume-drafts/{draft}/revise                     → reviseSelections (back to wizard)
  *
  * Entry point: POST from the job listing show page creates the draft
  * and redirects to Screen 1. */
@@ -389,3 +390,6 @@ Route::post('resume-drafts/{resume_draft}/revert', [ResumeDraftController::class
 
 Route::post('resume-drafts/{resume_draft}/approve', [ResumeDraftController::class, 'approve'])
     ->name('resume-drafts.approve');
+
+Route::post('resume-drafts/{resume_draft}/revise', [ResumeDraftController::class, 'reviseSelections'])
+    ->name('resume-drafts.revise-selections');

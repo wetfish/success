@@ -29,7 +29,7 @@ use Throwable;
  *   Screen 1  — Strategy & requirements triage (show)
  *   Screen 2  — Per-requirement selection review (showRequirement)
  *   Screen 3  — Confirm & generate (confirmPage / confirm)
- *   Editing   — Draft review & editing (edit / updateContent / revert / approve)
+ *   Editing   — Draft review & editing (edit / updateContent / revert / approve / reviseSelections)
  *
  * Routes:
  *   create            — POST: run AI analysis, persist requirements +
@@ -50,6 +50,7 @@ use Throwable;
  *   updateContent     — POST: save edited `user_content`
  *   revert            — POST: reset `user_content` to `generated_content`
  *   approve           — POST: advance status to `approved`
+ *   reviseSelections  — POST: discard draft, reset to `selecting`
  */
 class ResumeDraftController extends Controller
 {
@@ -906,6 +907,31 @@ class ResumeDraftController extends Controller
         return redirect()
             ->route('resume-drafts.edit', $resumeDraft)
             ->with('status', 'Draft approved — ready for document formatting.');
+    }
+
+    /**
+     * Discard the generated draft and return to the selection wizard.
+     * Clears both content columns and resets status to `selecting`
+     * so the user can revise their strategy, requirement decisions,
+     * and selection notes before regenerating.
+     */
+    public function reviseSelections(ResumeDraft $resumeDraft): RedirectResponse
+    {
+        if (! $resumeDraft->isEditing() && ! $resumeDraft->isApproved()) {
+            return redirect()
+                ->route('resume-drafts.show', $resumeDraft)
+                ->with('error', 'This draft cannot be revised from its current status.');
+        }
+
+        $resumeDraft->update([
+            'generated_content' => null,
+            'user_content' => null,
+            'status' => 'selecting',
+        ]);
+
+        return redirect()
+            ->route('resume-drafts.show', $resumeDraft)
+            ->with('status', 'Draft discarded — revise your selections and generate again.');
     }
 
     // -----------------------------------------------------------------
