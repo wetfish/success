@@ -96,12 +96,6 @@
             >
                 {{ $categoryLabel }}
             </span>
-            <span
-                class="text-xs px-1.5 py-0.5 rounded shrink-0"
-                style="background: var(--color-surface-input-border); color: var(--color-text-secondary);"
-            >
-                {{ $sectionLabel }}
-            </span>
         </div>
         @if ($requirement->description)
             <p class="text-sm" style="color: var(--color-text-muted);">

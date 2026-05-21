@@ -72,8 +72,9 @@
                         </button>
                         <span
                             class="text-xs"
-                            style="color: var(--color-text-muted); min-height: 1rem; display: inline-block;"
+                            style="color: var(--color-text-muted);"
                             data-strategy-status
+                            hidden
                         ></span>
                     </div>
                     <p class="text-xs mt-2" style="color: var(--color-text-muted);">
@@ -108,11 +109,18 @@
                             data-requirement-id="{{ $requirement->id }}"
                             data-decision="{{ $decision ?? '' }}"
                             data-decide-url="{{ route('resume-drafts.decide-requirement', [$draft, $requirement]) }}"
+                            data-review-url="{{ route('resume-drafts.requirement', [$draft, $requirement]) }}"
                         >
                             <div class="flex items-start justify-between gap-4">
                                 <div class="flex-1 min-w-0">
                                     <div class="flex items-baseline gap-2 mb-1">
-                                        <h3 class="font-medium">{{ $requirement->title }}</h3>
+                                        <a
+                                            href="{{ route('resume-drafts.requirement', [$draft, $requirement]) }}"
+                                            class="font-medium link-emphasis {{ $decision === 'accepted' ? '' : 'pointer-events-none' }}"
+                                            style="{{ $decision !== 'accepted' ? 'color: inherit; text-decoration: none;' : '' }}"
+                                            data-triage-title-link
+                                            @if ($decision !== 'accepted') tabindex="-1" @endif
+                                        >{{ $requirement->title }}</a>
                                         <span
                                             class="text-xs px-1.5 py-0.5 rounded shrink-0"
                                             style="background: var(--color-surface-input-border); color: var(--color-text-secondary);"

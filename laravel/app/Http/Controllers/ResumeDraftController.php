@@ -64,7 +64,6 @@ class ResumeDraftController extends Controller
      * short type slugs (used in form values) to model classes.
      */
     private const SELECTABLE_TYPES = [
-        'organization' => \App\Models\Organization::class,
         'position' => \App\Models\Position::class,
         'project' => \App\Models\Project::class,
         'accomplishment' => \App\Models\Accomplishment::class,
@@ -339,21 +338,13 @@ class ResumeDraftController extends Controller
         $like = '%' . addcslashes($query, '%_\\') . '%';
         $results = collect();
 
-        // Organizations — search by name.
-        $orgs = \App\Models\Organization::where('name', 'LIKE', $like)
-            ->take(3)->get()
-            ->map(fn ($o) => [
-                'id' => $o->id,
-                'type' => 'organization',
-                'name' => $o->name,
-                'context' => str_replace('_', ' ', $o->type),
-            ]);
-        $results = $results->merge($orgs);
-
-        // Positions — search by title, include org name as context.
+        // Positions — search by title OR parent organization name.
         $positions = \App\Models\Position::with('organization')
-            ->where('title', 'LIKE', $like)
-            ->take(3)->get()
+            ->where(function ($q) use ($like) {
+                $q->where('title', 'LIKE', $like)
+                    ->orWhereHas('organization', fn ($oq) => $oq->where('name', 'LIKE', $like));
+            })
+            ->take(4)->get()
             ->map(fn ($p) => [
                 'id' => $p->id,
                 'type' => 'position',
@@ -365,30 +356,43 @@ class ResumeDraftController extends Controller
             ]);
         $results = $results->merge($positions);
 
-        // Projects — search by name.
-        $projects = \App\Models\Project::with('organization')
-            ->where('name', 'LIKE', $like)
-            ->take(3)->get()
+        // Projects — search by name OR parent organization/position org name.
+        $projects = \App\Models\Project::with(['organization', 'position.organization'])
+            ->where(function ($q) use ($like) {
+                $q->where('name', 'LIKE', $like)
+                    ->orWhereHas('organization', fn ($oq) => $oq->where('name', 'LIKE', $like))
+                    ->orWhereHas('position.organization', fn ($oq) => $oq->where('name', 'LIKE', $like));
+            })
+            ->take(4)->get()
             ->map(fn ($p) => [
                 'id' => $p->id,
                 'type' => 'project',
                 'name' => $p->name,
-                'context' => $p->organization?->name ?? '',
+                'context' => $p->position
+                    ? ($p->position->title . ' at ' . ($p->position->organization?->name ?? 'Unknown'))
+                    : ($p->organization?->name ?? ''),
             ]);
         $results = $results->merge($projects);
 
-        // Accomplishments — search by title.
-        $accomplishments = \App\Models\Accomplishment::where('title', 'LIKE', $like)
-            ->take(3)->get()
+        // Accomplishments — search by title OR parent position/project org name.
+        $accomplishments = \App\Models\Accomplishment::with(['position.organization', 'project.organization'])
+            ->where(function ($q) use ($like) {
+                $q->where('title', 'LIKE', $like)
+                    ->orWhereHas('position.organization', fn ($oq) => $oq->where('name', 'LIKE', $like))
+                    ->orWhereHas('project.organization', fn ($oq) => $oq->where('name', 'LIKE', $like));
+            })
+            ->take(4)->get()
             ->map(fn ($a) => [
                 'id' => $a->id,
                 'type' => 'accomplishment',
-                'name' => $a->title,
-                'context' => $a->description ? \Illuminate\Support\Str::limit($a->description, 80) : '',
+                'name' => \Illuminate\Support\Str::limit($a->title, 80),
+                'context' => $a->position
+                    ? ($a->position->title . ' at ' . ($a->position->organization?->name ?? 'Unknown'))
+                    : ($a->project ? $a->project->name : ''),
             ]);
         $results = $results->merge($accomplishments);
 
-        return response()->json($results->take(8)->values()->all());
+        return response()->json($results->take(10)->values()->all());
     }
 
     /**

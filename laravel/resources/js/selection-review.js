@@ -19,7 +19,7 @@ function initSelectionReview(root) {
     const totalCount = barFill ? parseInt(barFill.dataset.total, 10) : 0;
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
 
-    // ── Include / Exclude toggles ────────────────────────────
+    // ── Include / Exclude / Remove ──────────────────────────
 
     root.addEventListener('click', (e) => {
         const actionBtn = e.target.closest('[data-action]');
@@ -29,11 +29,14 @@ function initSelectionReview(root) {
         if (!card) return;
 
         const action = actionBtn.dataset.action;
-        if (action !== 'include' && action !== 'exclude') return;
         if (actionBtn.disabled) return;
-
         e.preventDefault();
-        handleToggle(card, action);
+
+        if (action === 'include' || action === 'exclude') {
+            handleToggle(card, action);
+        } else if (action === 'remove') {
+            handleRemove(card, actionBtn);
+        }
     });
 
     async function handleToggle(card, action) {
@@ -58,6 +61,25 @@ function initSelectionReview(root) {
             applyCardState(card, wasSelected);
             updateCounter(wasSelected ? 1 : -1);
             showError(card, 'Action failed — please try again.');
+        }
+    }
+
+    async function handleRemove(card, btn) {
+        const url = card.dataset.removeUrl;
+        if (!url) return;
+
+        btn.disabled = true;
+        btn.textContent = 'Removing…';
+
+        try {
+            const data = await deleteJson(url);
+            if (!data.ok) throw new Error(data.error || 'Remove failed');
+            card.remove();
+        } catch (err) {
+            console.warn('[selection-review] Remove failed:', err);
+            btn.disabled = false;
+            btn.textContent = 'Remove';
+            showError(card, 'Remove failed — please try again.');
         }
     }
 
@@ -197,6 +219,21 @@ function initSelectionReview(root) {
         return response.json();
     }
 
+    async function deleteJson(url) {
+        const response = await fetch(url, {
+            method: 'DELETE',
+            headers: {
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': csrfToken || '',
+            },
+            credentials: 'same-origin',
+        });
+        if (!response.ok) {
+            throw new Error(`Request failed: ${response.status}`);
+        }
+        return response.json();
+    }
+
     function showError(card, message) {
         const el = card.querySelector('[data-selection-error]');
         if (el) { el.textContent = message; el.hidden = false; }
@@ -210,11 +247,12 @@ function initSelectionReview(root) {
     function showStatus(el, text) {
         if (!el) return;
         el.textContent = text;
+        el.hidden = false;
     }
 
     function fadeStatus(el, delay = 2000) {
         if (!el) return;
-        setTimeout(() => { el.textContent = ''; }, delay);
+        setTimeout(() => { el.hidden = true; }, delay);
     }
 
     function updateCounter(delta) {

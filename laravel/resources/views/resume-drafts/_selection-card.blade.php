@@ -1,5 +1,7 @@
-{{-- Selection card with Include/Exclude buttons, type badge,
-     AI reasoning, and editable user relevance note.
+{{-- Selection card with context-appropriate actions.
+     AI-suggested entries get Include/Exclude toggles (preserving
+     the decision we paid for). User-added entries get a Remove
+     button that deletes the row entirely.
 
      Variables:
        $draft     — the ResumeDraft
@@ -7,11 +9,14 @@
        $title     — display title for this entry
        $subtitle  — optional context line
        $typeBadge — short type label ("Position", "Project", "Skill", etc.)
+       $url       — optional link to the source record's show/edit page
 --}}
 @php
-    $stateClass = $selection->selected
+    $isUserAdded = $selection->ai_reasoning === null;
+    $url = $url ?? null;
+    $stateClass = $isUserAdded
         ? 'selection-card--included'
-        : 'selection-card--excluded';
+        : ($selection->selected ? 'selection-card--included' : 'selection-card--excluded');
 @endphp
 
 <div
@@ -21,11 +26,19 @@
     data-selected="{{ $selection->selected ? 'true' : 'false' }}"
     data-toggle-url="{{ route('resume-drafts.toggle', [$draft, $selection]) }}"
     data-note-url="{{ route('resume-drafts.update-note', [$draft, $selection]) }}"
+    @if ($isUserAdded)
+        data-remove-url="{{ route('resume-drafts.remove-selection', [$draft, $selection]) }}"
+        data-user-added
+    @endif
 >
     <div class="flex items-start justify-between gap-3 mb-2">
         <div class="min-w-0">
-            <div class="flex items-baseline gap-2">
-                <h3 class="text-base font-medium" data-selection-title>{{ $title }}</h3>
+            <div class="flex items-baseline gap-2 flex-wrap">
+                @if ($url)
+                    <a href="{{ $url }}" class="text-base font-medium link-emphasis" data-selection-title>{{ $title }}</a>
+                @else
+                    <h3 class="text-base font-medium" data-selection-title>{{ $title }}</h3>
+                @endif
                 <span
                     class="text-xs px-1.5 py-0.5 rounded shrink-0"
                     style="background: var(--color-surface-input-border); color: var(--color-text-secondary);"
@@ -42,24 +55,33 @@
 
         {{-- Status badges --}}
         <div class="shrink-0">
-            <span
-                class="status-badge status-badge--review-approved"
-                data-selection-badge="included"
-                @if (! $selection->selected) hidden @endif
-            >
-                Included
-            </span>
-            <span
-                class="status-badge status-badge-rejected"
-                data-selection-badge="excluded"
-                @if ($selection->selected) hidden @endif
-            >
-                Excluded
-            </span>
+            @if ($isUserAdded)
+                <span
+                    class="text-xs px-1.5 py-0.5 rounded"
+                    style="background: var(--color-surface-input-border); color: var(--color-text-secondary);"
+                >
+                    Added by you
+                </span>
+            @else
+                <span
+                    class="status-badge status-badge--review-approved"
+                    data-selection-badge="included"
+                    @if (! $selection->selected) hidden @endif
+                >
+                    Included
+                </span>
+                <span
+                    class="status-badge status-badge-rejected"
+                    data-selection-badge="excluded"
+                    @if ($selection->selected) hidden @endif
+                >
+                    Excluded
+                </span>
+            @endif
         </div>
     </div>
 
-    {{-- AI reasoning --}}
+    {{-- AI reasoning — only on AI-suggested entries --}}
     @if ($selection->ai_reasoning)
         <p class="text-sm mb-3 leading-relaxed" style="color: var(--color-text-muted);">
             <span class="font-medium" style="color: var(--color-text-secondary);">AI:</span>
@@ -69,7 +91,7 @@
 
     {{-- User relevance note — editable --}}
     @if ($draft->isSelecting())
-        <div class="mb-3" data-note-editor>
+        <div class="mb-3 relative" style="padding-bottom: 1.25rem;" data-note-editor>
             <label class="text-xs font-medium mb-1 block" style="color: var(--color-text-secondary);">
                 Your note — how does this address the requirement?
             </label>
@@ -81,8 +103,8 @@
                 data-note-input
             >{{ $selection->user_relevance_note }}</textarea>
             <span
-                class="text-xs mt-1 block"
-                style="color: var(--color-text-muted); min-height: 1rem;"
+                class="text-xs absolute bottom-0 left-0"
+                style="color: var(--color-text-muted);"
                 data-note-status
             ></span>
         </div>
@@ -96,22 +118,32 @@
     {{-- Action buttons --}}
     @if ($draft->isSelecting())
         <div class="flex gap-2" data-selection-actions>
-            <button
-                type="button"
-                data-action="include"
-                class="btn-primary text-sm"
-                @if ($selection->selected) disabled @endif
-            >
-                Include
-            </button>
-            <button
-                type="button"
-                data-action="exclude"
-                class="btn-destructive text-sm"
-                @if (! $selection->selected) disabled @endif
-            >
-                Exclude
-            </button>
+            @if ($isUserAdded)
+                <button
+                    type="button"
+                    data-action="remove"
+                    class="btn-destructive text-sm"
+                >
+                    Remove
+                </button>
+            @else
+                <button
+                    type="button"
+                    data-action="include"
+                    class="btn-primary text-sm"
+                    @if ($selection->selected) disabled @endif
+                >
+                    Include
+                </button>
+                <button
+                    type="button"
+                    data-action="exclude"
+                    class="btn-destructive text-sm"
+                    @if (! $selection->selected) disabled @endif
+                >
+                    Exclude
+                </button>
+            @endif
         </div>
     @endif
 

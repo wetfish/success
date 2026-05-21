@@ -92,6 +92,22 @@ function initRequirementTriage(root) {
         const rejectedBadge = card.querySelector('[data-triage-badge="rejected"]');
         if (acceptedBadge) acceptedBadge.hidden = (decision !== 'accepted');
         if (rejectedBadge) rejectedBadge.hidden = (decision !== 'rejected');
+
+        // Toggle the title link — clickable when accepted, inert otherwise.
+        const titleLink = card.querySelector('[data-triage-title-link]');
+        if (titleLink) {
+            if (decision === 'accepted') {
+                titleLink.classList.remove('pointer-events-none');
+                titleLink.style.color = '';
+                titleLink.style.textDecoration = '';
+                titleLink.removeAttribute('tabindex');
+            } else {
+                titleLink.classList.add('pointer-events-none');
+                titleLink.style.color = 'inherit';
+                titleLink.style.textDecoration = 'none';
+                titleLink.setAttribute('tabindex', '-1');
+            }
+        }
     }
 
     // ── Progress tracking ─────────────────────────────────────
@@ -249,10 +265,11 @@ function initRequirementTriage(root) {
     function showStatus(el, text) {
         if (!el) return;
         el.textContent = text;
+        el.hidden = false;
     }
 
     function fadeStatus(el, delay = 2000) {
         if (!el) return;
-        setTimeout(() => { el.textContent = ''; }, delay);
+        setTimeout(() => { el.hidden = true; }, delay);
     }
 }

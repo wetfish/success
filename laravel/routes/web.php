@@ -357,6 +357,9 @@ Route::post('resume-drafts/{resume_draft}/requirements/{requirement}/experience'
 Route::post('resume-drafts/{resume_draft}/selections/{selection}/toggle', [ResumeDraftController::class, 'toggle'])
     ->name('resume-drafts.toggle');
 
+Route::delete('resume-drafts/{resume_draft}/selections/{selection}', [ResumeDraftController::class, 'removeSelection'])
+    ->name('resume-drafts.remove-selection');
+
 Route::post('resume-drafts/{resume_draft}/selections/{selection}/note', [ResumeDraftController::class, 'updateNote'])
     ->name('resume-drafts.update-note');
 

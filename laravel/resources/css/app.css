@@ -79,6 +79,10 @@ body {
     opacity: 1;
 }
 
+a {
+    text-decoration: none;
+}
+
 @layer components {
     .btn-primary {
         display: inline-flex;
