@@ -17,12 +17,12 @@ use Throwable;
  * Shares the same API key and model config via the `services.extraction`
  * config block — same provider, same billing, different purpose.
  *
- * Currently supports one operation:
+ * Supports two operations:
  *   - analyzeRelevance: extract requirements from a listing, produce
  *     a strategy summary, and map catalog entries to requirements
- *
- * Future operations (5.3, 5.4):
  *   - generateDraft: produce a markdown resume from accepted selections
+ *
+ * Future operations (5.4):
  *   - formatDocument: convert approved draft to .docx/.pdf
  */
 class ResumeAiService
@@ -92,6 +92,97 @@ class ResumeAiService
             costCents: $this->computeCost($inputTokens, $outputTokens),
             model: $this->model,
         );
+    }
+
+    /**
+     * Generate a markdown resume draft from the user's confirmed
+     * selections, strategy, and requirement context. The prompt
+     * text is built externally by DraftPromptBuilder; this method
+     * handles the API call and response extraction.
+     *
+     * Returns raw markdown — no JSON parsing needed, since the
+     * system prompt instructs the AI to produce prose directly.
+     */
+    public function generateDraft(string $promptContext): DraftResult
+    {
+        $messages = [['role' => 'user', 'content' => $promptContext]];
+
+        try {
+            $response = $this->client()->post('/v1/messages', [
+                'model' => $this->model,
+                'max_tokens' => self::MAX_TOKENS,
+                'system' => $this->draftSystemPrompt(),
+                'messages' => $messages,
+            ]);
+        } catch (Throwable $e) {
+            throw new RuntimeException(
+                "Resume draft generation failed: {$e->getMessage()}", 0, $e
+            );
+        }
+
+        if (! $response->successful()) {
+            throw new RuntimeException(
+                "Resume draft AI returned {$response->status()}: " . $response->body()
+            );
+        }
+
+        $body = $response->json();
+        $markdown = $this->extractTextFromResponse($body);
+
+        $inputTokens = (int) ($body['usage']['input_tokens'] ?? 0);
+        $outputTokens = (int) ($body['usage']['output_tokens'] ?? 0);
+
+        return new DraftResult(
+            markdown: $markdown,
+            inputTokens: $inputTokens,
+            outputTokens: $outputTokens,
+            costCents: $this->computeCost($inputTokens, $outputTokens),
+            model: $this->model,
+        );
+    }
+
+    private function draftSystemPrompt(): string
+    {
+        return <<<'PROMPT'
+You are a professional resume writer. You will receive a job listing, a resume strategy, and a set of requirements with the candidate's curated evidence for each. Your job is to produce a polished, tailored resume in markdown.
+
+## Output structure
+
+Produce the resume as clean markdown with the following sections in order:
+
+1. **Header** — candidate name as an H1 (use "{{NAME}}" as a placeholder — the user will fill this in). No contact info — the user adds that during formatting.
+
+2. **Professional Summary** — 3-5 sentences, tightly aligned with the strategy summary provided. This is the narrative spine of the resume. Don't repeat the strategy verbatim — translate it into first-person professional prose that a hiring manager reads in 10 seconds.
+
+3. **Experience** — the core section. Group by position (company + title + dates), with bullet points for accomplishments and project highlights under each. Rules:
+   - Only include positions, projects, and accomplishments that appear in the provided evidence. Do not invent or embellish.
+   - Prioritize accomplishments with concrete impact metrics — lead with the number.
+   - Each bullet should be 1-2 sentences. Concise, active voice, past tense for completed work, present tense for current roles.
+   - Tailor the framing to the target role. The same accomplishment should read differently for a frontend role vs a platform engineering role. Use the requirement context and relevance notes to guide emphasis.
+   - If a user relevance note says to emphasize or frame something a specific way, follow that guidance — the user knows their story better than you do.
+   - When multiple requirements map to the same position, weave them together naturally rather than repeating the position.
+   - Omit positions that have no selected evidence beneath them.
+
+4. **Skills** — a concise list of relevant skills/technologies drawn from the Tag evidence and from skills mentioned in the experience bullets. Group by category if there are enough (e.g., Languages, Frameworks, Tools, Platforms). Don't list every skill the candidate has — only those relevant to this specific role.
+
+5. **Additional** (optional) — career themes, portfolio links, or other evidence that doesn't fit neatly into Experience or Skills. Only include this section if there's meaningful content for it. Label it appropriately (e.g., "Publications", "Open Source", "Speaking", or just "Additional").
+
+## Formatting rules
+
+- Use standard markdown: `#` for the name, `##` for section headers, `###` for position headers, `-` for bullets.
+- Position headers should follow the pattern: `### Title, Organization` with dates on the next line in italics: `*Month Year – Month Year*` (or `*Month Year – Present*`).
+- No bold within bullets unless genuinely needed for emphasis. Clean prose beats heavy formatting.
+- No markdown links in the experience section — URLs go in the Additional section if included at all.
+- Aim for 1-2 pages of content when rendered. Be selective rather than comprehensive — a tight resume beats a thorough one.
+
+## What NOT to do
+
+- Do not fabricate accomplishments, metrics, or experiences not present in the evidence.
+- Do not include generic filler bullets ("Collaborated with cross-functional teams" with no specifics).
+- Do not add a cover letter, objective statement, or references section.
+- Do not include explanatory comments or meta-text — output only the resume markdown.
+- Do not wrap the output in code fences.
+PROMPT;
     }
 
     private function buildRelevanceMessage(
