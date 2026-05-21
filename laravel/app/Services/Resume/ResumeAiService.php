@@ -216,6 +216,136 @@ PROMPT;
         );
     }
 
+    /**
+     * Parse approved resume markdown into a structured JSON spec
+     * for document rendering. The AI handles all formatting
+     * decisions (what's bold, how sections are grouped, date
+     * formatting) and returns a predictable structure that the
+     * PhpWord renderer can consume mechanically.
+     *
+     * @return array The parsed document spec.
+     */
+    public function generateDocumentSpec(string $markdownContent): array
+    {
+        $userMessage = <<<MESSAGE
+        Parse this resume markdown into a structured JSON document spec. Return ONLY the JSON object, no preamble, no code fences.
+
+        ---
+
+        {$markdownContent}
+        MESSAGE;
+
+        $messages = [['role' => 'user', 'content' => $userMessage]];
+
+        try {
+            $response = $this->client()->post('/v1/messages', [
+                'model' => $this->model,
+                'max_tokens' => 4000,
+                'system' => $this->documentSpecSystemPrompt(),
+                'messages' => $messages,
+            ]);
+        } catch (Throwable $e) {
+            throw new RuntimeException(
+                "Document spec generation failed: {$e->getMessage()}", 0, $e
+            );
+        }
+
+        if (! $response->successful()) {
+            throw new RuntimeException(
+                "Document spec AI returned {$response->status()}: " . $response->body()
+            );
+        }
+
+        $body = $response->json();
+        $text = $this->extractTextFromResponse($body);
+        $spec = $this->parseJsonResponse($text);
+
+        $inputTokens = (int) ($body['usage']['input_tokens'] ?? 0);
+        $outputTokens = (int) ($body['usage']['output_tokens'] ?? 0);
+
+        // Attach token usage to the spec for tracking.
+        $spec['_usage'] = [
+            'input_tokens' => $inputTokens,
+            'output_tokens' => $outputTokens,
+            'cost_cents' => $this->computeCost($inputTokens, $outputTokens),
+            'model' => $this->model,
+        ];
+
+        return $spec;
+    }
+
+    private function documentSpecSystemPrompt(): string
+    {
+        return <<<'PROMPT'
+You are a resume document formatter. You will receive resume content in markdown. Parse it into a structured JSON object that a document rendering engine can consume.
+
+Return a JSON object with these keys:
+
+{
+  "name": "Candidate Name",
+  "summary": "The professional summary paragraph as a single string.",
+  "experience": [
+    {
+      "title": "Job Title",
+      "organization": "Company Name",
+      "dates": "Month Year – Month Year",
+      "bullets": [
+        "First accomplishment or responsibility.",
+        "Second accomplishment with metrics."
+      ]
+    }
+  ],
+  "skills": [
+    {
+      "category": "Category Name",
+      "items": ["Skill 1", "Skill 2", "Skill 3"]
+    }
+  ],
+  "additional": [
+    {
+      "heading": "Section Name",
+      "items": ["First item.", "Second item."]
+    }
+  ]
+}
+
+Rules:
+- Extract the candidate name from the H1 heading. If it's a placeholder like "{{NAME}}", use it as-is.
+- The summary is the text under "Professional Summary" or similar heading, as a single string.
+- Each experience entry is one position. Preserve the exact title, organization, and date range from the markdown.
+- Bullets are the dash-prefixed items under each position. Preserve the exact text — do not rewrite.
+- Skills should be grouped by category if the markdown groups them. If skills are a flat list, use a single entry with category "Skills".
+- The additional section captures anything after Skills — career themes, publications, open source, portfolio links. Each sub-heading becomes an entry. If there is no additional content, use an empty array.
+- Preserve all text exactly as written. Your job is to PARSE, not rewrite.
+- Return only the JSON object. No preamble, no explanation, no code fences.
+PROMPT;
+    }
+
+    /**
+     * Parse a JSON response from the AI, tolerant of code fences.
+     */
+    private function parseJsonResponse(string $text): array
+    {
+        $cleaned = trim($text);
+
+        if (str_starts_with($cleaned, '```')) {
+            $cleaned = preg_replace('/^```(?:json)?\s*/', '', $cleaned);
+            $cleaned = preg_replace('/```\s*$/', '', $cleaned);
+            $cleaned = trim($cleaned);
+        }
+
+        $parsed = json_decode($cleaned, true);
+
+        if (! is_array($parsed)) {
+            throw new RuntimeException(
+                'Could not parse JSON from document spec response. Raw: ' .
+                substr($text, 0, 500)
+            );
+        }
+
+        return $parsed;
+    }
+
     private function draftSystemPrompt(): string
     {
         return <<<'PROMPT'
