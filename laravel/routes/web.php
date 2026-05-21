@@ -302,10 +302,11 @@ Route::resource('people', PersonController::class);
 Route::resource('job-listings', JobListingController::class);
 
 /* Resume draft wizard routes.
- * Three-screen wizard flow, all within the `selecting` status:
+ * Three-screen wizard flow within the `selecting` status, followed
+ * by draft generation and an editing phase:
  *
  *   Screen 1 — Strategy & requirements triage
- *     GET  /resume-drafts/{draft}                            → show (triage page)
+ *     GET  /resume-drafts/{draft}                            → show (status router)
  *     POST /resume-drafts/{draft}/strategy                   → AJAX: save strategy
  *     POST /resume-drafts/{draft}/requirements/{req}/decide  → AJAX: accept/reject
  *
@@ -318,7 +319,13 @@ Route::resource('job-listings', JobListingController::class);
  *
  *   Screen 3 — Confirm & generate
  *     GET  /resume-drafts/{draft}/confirm                    → confirmPage
- *     POST /resume-drafts/{draft}/confirm                    → confirm (advance status)
+ *     POST /resume-drafts/{draft}/confirm                    → confirm (trigger generation)
+ *
+ *   Editing — Draft review & editing
+ *     GET  /resume-drafts/{draft}/edit                       → edit (markdown editor)
+ *     POST /resume-drafts/{draft}/content                    → updateContent (save edits)
+ *     POST /resume-drafts/{draft}/revert                     → revert to AI original
+ *     POST /resume-drafts/{draft}/approve                    → approve (advance status)
  *
  * Entry point: POST from the job listing show page creates the draft
  * and redirects to Screen 1. */
@@ -369,3 +376,16 @@ Route::get('resume-drafts/{resume_draft}/confirm', [ResumeDraftController::class
 
 Route::post('resume-drafts/{resume_draft}/confirm', [ResumeDraftController::class, 'confirm'])
     ->name('resume-drafts.confirm');
+
+// Editing: Draft review & editing.
+Route::get('resume-drafts/{resume_draft}/edit', [ResumeDraftController::class, 'edit'])
+    ->name('resume-drafts.edit');
+
+Route::post('resume-drafts/{resume_draft}/content', [ResumeDraftController::class, 'updateContent'])
+    ->name('resume-drafts.update-content');
+
+Route::post('resume-drafts/{resume_draft}/revert', [ResumeDraftController::class, 'revert'])
+    ->name('resume-drafts.revert');
+
+Route::post('resume-drafts/{resume_draft}/approve', [ResumeDraftController::class, 'approve'])
+    ->name('resume-drafts.approve');

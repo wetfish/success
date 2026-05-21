@@ -214,7 +214,7 @@ class DraftPromptBuilder
             $selectable instanceof CareerTheme => $this->formatCareerTheme($selectable),
             $selectable instanceof Tag => $this->formatTag($selectable),
             $selectable instanceof Link => $this->formatLink($selectable),
-            default => "- {$selectable->name ?? $selectable->title ?? '[unknown]'}",
+            default => '- ' . ($selectable->name ?? $selectable->title ?? '[unknown]'),
         };
     }
 
