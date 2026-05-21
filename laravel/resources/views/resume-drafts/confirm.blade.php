@@ -60,6 +60,12 @@
                                 <p class="text-sm" style="color: var(--color-text-muted);">
                                     {{ $included }} included {{ Str::plural('entry', $included) }}@if ($experiences > 0), {{ $experiences }} freeform {{ Str::plural('response', $experiences) }}@endif
                                 </p>
+                                @if (! empty($duplicatesMap[$requirement->id]))
+                                    <p class="text-xs mt-1" style="color: var(--color-text-muted);">
+                                        Also addresses:
+                                        {{ implode(', ', $duplicatesMap[$requirement->id]) }}
+                                    </p>
+                                @endif
                             </div>
 
                             <a

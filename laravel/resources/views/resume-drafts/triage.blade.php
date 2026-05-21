@@ -4,9 +4,17 @@
 
 @php
     $totalRequirements = collect($sections)->sum(fn ($s) => $s['requirements']->count());
-    $decidedCount = count(array_filter($decisions));
+    $decidedCount = count(array_filter($decisions, fn ($d) => $d !== null));
     $acceptedCount = count(array_filter($decisions, fn ($d) => $d === 'accepted'));
     $progressPercent = $totalRequirements > 0 ? (int) round(($decidedCount / $totalRequirements) * 100) : 0;
+
+    // Helper to read the decision type from the mixed format.
+    $getDecisionType = function ($decision) {
+        if ($decision === 'accepted') return 'accepted';
+        if ($decision === 'rejected') return 'rejected';
+        if (is_array($decision) && isset($decision['duplicate_of'])) return 'duplicate';
+        return null;
+    };
 @endphp
 
 @section('content')
@@ -100,14 +108,24 @@
                     @foreach ($section['requirements'] as $requirement)
                         @php
                             $decision = $decisions[$requirement->id] ?? null;
+                            $decisionType = $getDecisionType($decision);
+                            $duplicateOfId = is_array($decision) ? ($decision['duplicate_of'] ?? null) : null;
                             $count = $matchCounts[$requirement->id] ?? 0;
+                            $cardClass = match ($decisionType) {
+                                'accepted' => 'triage-card--accepted',
+                                'rejected' => 'triage-card--rejected',
+                                'duplicate' => 'triage-card--duplicate',
+                                default => '',
+                            };
                         @endphp
 
                         <div
-                            class="triage-card {{ $decision === 'accepted' ? 'triage-card--accepted' : ($decision === 'rejected' ? 'triage-card--rejected' : '') }}"
+                            class="triage-card {{ $cardClass }}"
                             data-triage-card
                             data-requirement-id="{{ $requirement->id }}"
-                            data-decision="{{ $decision ?? '' }}"
+                            data-requirement-title="{{ $requirement->title }}"
+                            data-decision="{{ $decisionType ?? '' }}"
+                            data-duplicate-of="{{ $duplicateOfId ?? '' }}"
                             data-decide-url="{{ route('resume-drafts.decide-requirement', [$draft, $requirement]) }}"
                             data-review-url="{{ route('resume-drafts.requirement', [$draft, $requirement]) }}"
                         >
@@ -116,10 +134,10 @@
                                     <div class="flex items-baseline gap-2 mb-1">
                                         <a
                                             href="{{ route('resume-drafts.requirement', [$draft, $requirement]) }}"
-                                            class="font-medium link-emphasis {{ $decision === 'accepted' ? '' : 'pointer-events-none' }}"
-                                            style="{{ $decision !== 'accepted' ? 'color: inherit; text-decoration: none;' : '' }}"
+                                            class="font-medium link-emphasis {{ $decisionType === 'accepted' ? '' : 'pointer-events-none' }}"
+                                            style="{{ $decisionType !== 'accepted' ? 'color: inherit; text-decoration: none;' : '' }}"
                                             data-triage-title-link
-                                            @if ($decision !== 'accepted') tabindex="-1" @endif
+                                            @if ($decisionType !== 'accepted') tabindex="-1" @endif
                                         >{{ $requirement->title }}</a>
                                         <span
                                             class="text-xs px-1.5 py-0.5 rounded shrink-0"
@@ -138,14 +156,14 @@
                                     </p>
                                 </div>
 
-                                {{-- Accept / Reject buttons --}}
+                                {{-- Accept / Skip / Duplicate buttons --}}
                                 @if ($draft->isSelecting())
-                                    <div class="flex items-center gap-2 shrink-0">
+                                    <div class="flex items-center gap-2 shrink-0 flex-wrap justify-end">
                                         <button
                                             type="button"
                                             class="btn-secondary text-sm"
                                             data-triage-action="accepted"
-                                            {{ $decision === 'accepted' ? 'disabled' : '' }}
+                                            {{ $decisionType === 'accepted' ? 'disabled' : '' }}
                                         >
                                             Accept
                                         </button>
@@ -153,31 +171,65 @@
                                             type="button"
                                             class="btn-secondary text-sm"
                                             data-triage-action="rejected"
-                                            {{ $decision === 'rejected' ? 'disabled' : '' }}
+                                            {{ $decisionType === 'rejected' ? 'disabled' : '' }}
                                         >
                                             Skip
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="btn-secondary text-sm"
+                                            data-triage-action="duplicate"
+                                            {{ $decisionType === 'duplicate' ? 'disabled' : '' }}
+                                        >
+                                            Duplicate
                                         </button>
                                     </div>
                                 @endif
                             </div>
 
-                            {{-- Decision badges (shown after decision, hidden by default) --}}
+                            {{-- Duplicate picker — hidden until "Duplicate" is clicked --}}
+                            <div data-duplicate-picker hidden class="mt-3">
+                                <label class="text-xs font-medium block mb-1" style="color: var(--color-text-secondary);">
+                                    This is a duplicate of:
+                                </label>
+                                <select
+                                    class="input text-sm"
+                                    data-duplicate-select
+                                >
+                                    <option value="">Select an accepted requirement…</option>
+                                </select>
+                            </div>
+
+                            {{-- Decision badges --}}
                             <span
                                 class="status-badge status-badge-confirmed text-xs mt-2"
                                 data-triage-badge="accepted"
-                                {{ $decision !== 'accepted' ? 'hidden' : '' }}
+                                {{ $decisionType !== 'accepted' ? 'hidden' : '' }}
                             >
                                 Accepted
                             </span>
                             <span
                                 class="status-badge status-badge-rejected text-xs mt-2"
                                 data-triage-badge="rejected"
-                                {{ $decision !== 'rejected' ? 'hidden' : '' }}
+                                {{ $decisionType !== 'rejected' ? 'hidden' : '' }}
                             >
                                 Skipped
                             </span>
+                            <span
+                                class="text-xs mt-2 inline-block"
+                                style="color: var(--color-text-muted);"
+                                data-triage-badge="duplicate"
+                                {{ $decisionType !== 'duplicate' ? 'hidden' : '' }}
+                            >
+                                @if ($duplicateOfId)
+                                    @php
+                                        $primaryTitle = $jobListing->requirements->firstWhere('id', $duplicateOfId)?->title ?? 'unknown';
+                                    @endphp
+                                    Duplicate of: {{ $primaryTitle }}
+                                @endif
+                            </span>
 
-                            {{-- Error message (hidden by default) --}}
+                            {{-- Error message --}}
                             <p
                                 class="text-xs mt-2"
                                 style="color: var(--color-error);"
@@ -211,7 +263,7 @@
                     if ($allDecided && $acceptedCount > 0) {
                         foreach ($sections as $section) {
                             foreach ($section['requirements'] as $req) {
-                                if (($decisions[$req->id] ?? null) === 'accepted') {
+                                if ($getDecisionType($decisions[$req->id] ?? null) === 'accepted') {
                                     $firstAccepted = $req;
                                     break 2;
                                 }

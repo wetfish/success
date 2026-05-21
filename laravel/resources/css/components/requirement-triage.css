@@ -19,4 +19,9 @@
         border-color: rgb(148 163 184 / 0.4);
         opacity: 0.6;
     }
+
+    .triage-card--duplicate {
+        border-color: rgb(148 163 184 / 0.4);
+        opacity: 0.7;
+    }
 }

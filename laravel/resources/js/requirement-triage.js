@@ -23,6 +23,7 @@ function initRequirementTriage(root) {
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
 
     // Track decisions client-side for progress and continue-button state.
+    // Values: 'accepted', 'rejected', or 'duplicate'.
     const decisions = {};
     root.querySelectorAll('[data-triage-card]').forEach(card => {
         const id = card.dataset.requirementId;
@@ -30,7 +31,7 @@ function initRequirementTriage(root) {
         if (decision) decisions[id] = decision;
     });
 
-    // ── Accept / Skip buttons ─────────────────────────────────
+    // ── Accept / Skip / Duplicate buttons ─────────────────────
 
     root.addEventListener('click', (e) => {
         const actionBtn = e.target.closest('[data-triage-action]');
@@ -41,10 +42,67 @@ function initRequirementTriage(root) {
         if (actionBtn.disabled) return;
 
         e.preventDefault();
-        handleDecision(card, actionBtn.dataset.triageAction);
+        const action = actionBtn.dataset.triageAction;
+
+        if (action === 'duplicate') {
+            showDuplicatePicker(card);
+        } else {
+            // Hide picker if it was open and user chose Accept/Skip instead.
+            hideDuplicatePicker(card);
+            handleDecision(card, action);
+        }
     });
 
-    async function handleDecision(card, decision) {
+    // ── Duplicate picker ──────────────────────────────────────
+
+    function showDuplicatePicker(card) {
+        const picker = card.querySelector('[data-duplicate-picker]');
+        const select = card.querySelector('[data-duplicate-select]');
+        if (!picker || !select) return;
+
+        const currentId = card.dataset.requirementId;
+
+        // Populate options from currently accepted requirements.
+        select.innerHTML = '<option value="">Select an accepted requirement…</option>';
+        root.querySelectorAll('[data-triage-card][data-decision="accepted"]').forEach(acceptedCard => {
+            const id = acceptedCard.dataset.requirementId;
+            if (id === currentId) return;
+            const title = acceptedCard.dataset.requirementTitle || `Requirement #${id}`;
+            const option = document.createElement('option');
+            option.value = id;
+            option.textContent = title;
+            select.appendChild(option);
+        });
+
+        if (select.options.length <= 1) {
+            showError(card, 'Accept at least one other requirement first.');
+            return;
+        }
+
+        picker.hidden = false;
+    }
+
+    function hideDuplicatePicker(card) {
+        const picker = card.querySelector('[data-duplicate-picker]');
+        if (picker) picker.hidden = true;
+    }
+
+    // When the user selects a primary from the picker.
+    root.addEventListener('change', (e) => {
+        const select = e.target.closest('[data-duplicate-select]');
+        if (!select) return;
+
+        const card = select.closest('[data-triage-card]');
+        if (!card) return;
+
+        const primaryId = select.value;
+        if (!primaryId) return;
+
+        hideDuplicatePicker(card);
+        handleDecision(card, 'duplicate', parseInt(primaryId, 10));
+    });
+
+    async function handleDecision(card, decision, duplicateOf = null) {
         const url = card.dataset.decideUrl;
         const requirementId = card.dataset.requirementId;
         if (!url) return;
@@ -53,19 +111,24 @@ function initRequirementTriage(root) {
         const wasPreviouslyUndecided = !previousDecision;
 
         // Optimistic UI update.
-        applyDecisionState(card, decision);
+        applyDecisionState(card, decision, duplicateOf);
         decisions[requirementId] = decision;
         if (wasPreviouslyUndecided) updateProgress(1);
         updateContinueButton();
 
+        const body = { decision };
+        if (decision === 'duplicate' && duplicateOf) {
+            body.duplicate_of = duplicateOf;
+        }
+
         try {
-            const data = await postJson(url, { decision });
+            const data = await postJson(url, body);
             if (!data.ok) throw new Error(data.error || 'Decision failed');
             hideError(card);
         } catch (err) {
             console.warn('[requirement-triage] Decision failed:', err);
             // Revert on failure.
-            applyDecisionState(card, previousDecision || '');
+            applyDecisionState(card, previousDecision || '', null);
             if (previousDecision) {
                 decisions[requirementId] = previousDecision;
             } else {
@@ -73,25 +136,41 @@ function initRequirementTriage(root) {
             }
             if (wasPreviouslyUndecided) updateProgress(-1);
             updateContinueButton();
-            showError(card, 'Action failed — please try again.');
+            showError(card, err.message || 'Action failed — please try again.');
         }
     }
 
-    function applyDecisionState(card, decision) {
+    function applyDecisionState(card, decision, duplicateOf = null) {
         card.dataset.decision = decision;
+        card.dataset.duplicateOf = duplicateOf || '';
 
         card.classList.toggle('triage-card--accepted', decision === 'accepted');
         card.classList.toggle('triage-card--rejected', decision === 'rejected');
+        card.classList.toggle('triage-card--duplicate', decision === 'duplicate');
 
         const acceptBtn = card.querySelector('[data-triage-action="accepted"]');
         const skipBtn = card.querySelector('[data-triage-action="rejected"]');
+        const dupBtn = card.querySelector('[data-triage-action="duplicate"]');
         if (acceptBtn) acceptBtn.disabled = (decision === 'accepted');
         if (skipBtn) skipBtn.disabled = (decision === 'rejected');
+        if (dupBtn) dupBtn.disabled = (decision === 'duplicate');
 
         const acceptedBadge = card.querySelector('[data-triage-badge="accepted"]');
         const rejectedBadge = card.querySelector('[data-triage-badge="rejected"]');
+        const duplicateBadge = card.querySelector('[data-triage-badge="duplicate"]');
         if (acceptedBadge) acceptedBadge.hidden = (decision !== 'accepted');
         if (rejectedBadge) rejectedBadge.hidden = (decision !== 'rejected');
+        if (duplicateBadge) {
+            duplicateBadge.hidden = (decision !== 'duplicate');
+            if (decision === 'duplicate' && duplicateOf) {
+                // Find the primary's title.
+                const primaryCard = root.querySelector(
+                    `[data-triage-card][data-requirement-id="${duplicateOf}"]`
+                );
+                const primaryTitle = primaryCard?.dataset.requirementTitle || `#${duplicateOf}`;
+                duplicateBadge.textContent = `Duplicate of: ${primaryTitle}`;
+            }
+        }
 
         // Toggle the title link — clickable when accepted, inert otherwise.
         const titleLink = card.querySelector('[data-triage-title-link]');
