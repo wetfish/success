@@ -1,0 +1,142 @@
+/* Organization picker component styles.
+ *
+ * Single-select autocomplete for choosing an organization. Simpler
+ * than the tag and person pickers — no chips, just a search input
+ * that resolves to one selection shown as a display label with a
+ * clear button.
+ *
+ * Two visual states via .has-selection on the root:
+ *   - No selection: search input visible, selected display hidden
+ *   - Has selection: search input hidden, selected display visible
+ */
+
+ @layer components {
+    .org-picker {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    /* Search input + dropdown anchor. */
+    .org-picker-input-wrap {
+        position: relative;
+    }
+
+    /* When a selection exists, hide the search input and show the
+     * selected display. When no selection, reverse. */
+    .org-picker.has-selection .org-picker-input-wrap {
+        display: none;
+    }
+    .org-picker-selected-wrap {
+        display: none;
+    }
+    .org-picker.has-selection .org-picker-selected-wrap {
+        display: flex;
+    }
+
+    /* Selected org display — name + clear button, styled to match
+     * the input field so the form reads consistently. */
+    .org-picker-selected-wrap {
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 0.75rem;
+        background: var(--color-surface-input);
+        border: 1px solid var(--color-surface-input-border);
+        border-radius: 0.375rem;
+        box-shadow: var(--shadow-input-inset);
+    }
+
+    .org-picker-selected-name {
+        flex: 1;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: var(--color-text-primary);
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .org-picker-clear {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.25rem;
+        height: 1.25rem;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--color-text-muted);
+        cursor: pointer;
+        border-radius: 9999px;
+        flex-shrink: 0;
+        transition: color 150ms ease, background 150ms ease;
+    }
+    .org-picker-clear:hover {
+        color: var(--color-text-primary);
+        background: rgb(255 255 255 / 0.08);
+    }
+    .org-picker-clear:focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 1px;
+    }
+
+    /* Dropdown. Same treatment as person/tag picker dropdowns. */
+    .org-picker-dropdown {
+        position: absolute;
+        top: calc(100% + 0.25rem);
+        left: 0;
+        right: 0;
+        z-index: 10;
+        list-style: none;
+        padding: 0.25rem;
+        margin: 0;
+        background: var(--color-surface-input);
+        border: 1px solid var(--color-surface-input-border);
+        border-radius: 0.5rem;
+        box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+        max-height: 20rem;
+        overflow-y: auto;
+    }
+
+    /* Result rows. */
+    .org-picker-result {
+        padding: 0.5rem 0.625rem;
+        border-radius: 0.375rem;
+        cursor: pointer;
+        transition: background-color 100ms ease-out;
+    }
+
+    .org-picker-result.is-highlighted {
+        background: var(--color-hover-overlay);
+    }
+
+    .org-picker-result-name {
+        font-size: 0.9375rem;
+        font-weight: 500;
+        color: var(--color-text-primary);
+    }
+
+    .org-picker-result-context {
+        font-size: 0.75rem;
+        color: var(--color-text-secondary);
+        margin-top: 0.125rem;
+    }
+
+    /* "Create as prospect" row — accent color to stand out. */
+    .org-picker-result--create .org-picker-result-name {
+        color: var(--color-accent);
+    }
+
+    .org-picker-result--empty {
+        padding: 0.625rem;
+        color: var(--color-text-muted);
+        font-size: 0.875rem;
+        font-style: italic;
+        cursor: default;
+        text-align: center;
+    }
+    .org-picker-result--empty:hover {
+        background: transparent;
+    }
+}

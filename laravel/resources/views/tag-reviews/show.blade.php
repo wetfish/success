@@ -20,6 +20,7 @@
 @endphp
 
 @section('content')
+    @include('partials._resume-wizard-banner')
     <div class="mb-2">
         <a href="{{ route('source-documents.show', $sourceDocument) }}" class="link-subtle text-sm">
             ← {{ $sourceDocument->title ?: 'Untitled document' }}

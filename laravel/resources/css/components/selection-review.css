@@ -1,0 +1,25 @@
+/* Selection review card styles. Follows the same pattern as
+ * tag-review-card: border tint indicates the current decision,
+ * explicit action buttons (Include / Exclude) are always visible.
+ *
+ * Reuses the existing status-badge--review-approved and
+ * status-badge-rejected classes from app.css for the badges. */
+
+ @layer components {
+    .selection-card {
+        border: 1px solid var(--color-surface-input-border);
+        background: var(--color-surface-input);
+        border-radius: 0.5rem;
+        padding: 1rem;
+        transition: border-color 200ms ease, opacity 200ms ease;
+    }
+
+    .selection-card--included {
+        border-color: var(--color-accent);
+    }
+
+    .selection-card--excluded {
+        border-color: rgb(148 163 184 / 0.4);
+        opacity: 0.6;
+    }
+}

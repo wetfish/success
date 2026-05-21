@@ -14,6 +14,8 @@ All routes live in `routes/web.php`. No API routes yet — the app is server-ren
 | Tag | resource minus `show` | — |
 | TagAlias | `store`, `destroy` only | nested under tag: `tags/{tag}/aliases` |
 | Person | full resource | — |
+| JobListing | full resource | — |
+| ResumeDraft | custom wizard routes (see below) | `POST job-listings/{listing}/resume-drafts` |
 
 Each entity has its own controller in `app/Http/Controllers/` and a corresponding `{Entity}CrudTest` in `tests/Feature/`.
 
@@ -204,6 +206,52 @@ People are managers, collaborators, mentors, and other individuals the user has 
 **Soft-delete preserves collaborator pivots.** Pivot rows in the three collaborator tables are NOT touched by Person's soft-delete. The relationships still reference the soft-deleted person; restoring the person brings back the full history. Force-delete (DB cascade) is the only way to wipe pivots.
 
 **Search endpoint mirrors tags but simpler.** `GET /people/search?q=…` returns up to 5 ranked results (tier 1: name prefix, tier 2: name substring). Response includes `current_title` and `current_organization_name` for picker dropdown disambiguation. No alias machinery — people don't have aliases.
+
+## Resume generation wizard
+
+`ResumeDraftController` orchestrates a three-screen wizard for building a resume against a job listing. All screens operate within the `selecting` status; the draft advances to `drafting` on final confirmation. Not a standard resource — the flow is entry-point → multi-page review → confirm.
+
+**Entry point.** `POST /job-listings/{listing}/resume-drafts` runs AI analysis (extracts requirements, maps catalog entries, generates strategy summary), persists everything in a transaction, and redirects to Screen 1. If a draft in `selecting` status already exists for the listing, the user is redirected to it instead of creating a duplicate.
+
+### Screen 1: Strategy & requirements triage
+
+| Route | Method | Name |
+|---|---|---|
+| `resume-drafts/{draft}` | GET | `resume-drafts.show` |
+| `resume-drafts/{draft}/strategy` | POST | `resume-drafts.update-strategy` |
+| `resume-drafts/{draft}/strategy/synthesize` | POST | `resume-drafts.synthesize-strategy` |
+| `resume-drafts/{draft}/requirements/{req}/decide` | POST | `resume-drafts.decide-requirement` |
+
+The triage page shows the editable strategy summary and all requirements grouped by section. Each requirement has Accept, Skip, and Duplicate buttons. The strategy editor supports synthesis — the user types their own framing, clicks "Synthesize with AI", and the result merges the AI-generated strategy with the user's input via `ExtractionProvider::synthesize()`.
+
+**Decisions** are stored in the `requirement_decisions` JSON column as a map of requirement ID → decision. Decision values are `"accepted"`, `"rejected"`, or `{"duplicate_of": <id>}`. Duplicates link to a primary accepted requirement — they don't get their own Screen 2 page but their selections still contribute to the resume during draft generation. All requirements must be decided before the user can proceed.
+
+### Screen 2: Per-requirement review
+
+| Route | Method | Name |
+|---|---|---|
+| `resume-drafts/{draft}/requirements/{req}` | GET | `resume-drafts.requirement` |
+| `resume-drafts/{draft}/requirements/{req}/selections` | POST | `resume-drafts.add-selection` |
+| `resume-drafts/{draft}/requirements/{req}/experience` | POST | `resume-drafts.submit-experience` |
+| `resume-drafts/{draft}/selections/{sel}/toggle` | POST | `resume-drafts.toggle` |
+| `resume-drafts/{draft}/selections/{sel}/note` | POST | `resume-drafts.update-note` |
+| `resume-drafts/{draft}/selections/{sel}` | DELETE | `resume-drafts.remove-selection` |
+| `resume-drafts/catalog-search` | GET | `resume-drafts.catalog-search` |
+
+One accepted requirement per page. Shows AI-suggested selection cards (Include/Exclude toggles, relevance notes with debounced auto-save), a catalog search picker for adding entries, and a freeform text input. User-added selections (no `ai_reasoning`) show a Remove button instead of Include/Exclude. AI-suggested entries cannot be deleted, only excluded.
+
+**Catalog search** queries positions, projects, and accomplishments by name/title and by parent organization name. Organizations themselves are excluded from results. Freeform text submission creates a `SourceDocument` with `origin = 'requirement_response'` and redirects to the extraction preview page; a contextual banner on all extraction review pages tells the user they'll return to the wizard when done, and the `DraftReviewController` auto-redirects back when all drafts are reviewed.
+
+Navigation: Previous/Next between accepted requirements, with the last "Next" linking to Screen 3.
+
+### Screen 3: Confirm & generate
+
+| Route | Method | Name |
+|---|---|---|
+| `resume-drafts/{draft}/confirm` | GET | `resume-drafts.confirm-page` |
+| `resume-drafts/{draft}/confirm` | POST | `resume-drafts.confirm` |
+
+Read-only summary: strategy, accepted requirements with included selection counts and freeform response counts, duplicate grouping ("Also addresses: [titles]"), and edit links back to each requirement's Screen 2 page. The confirm POST validates at least one accepted requirement with at least one included selection, then advances the draft to `drafting` status.
 
 ## Destroy redirects
 

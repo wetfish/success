@@ -282,6 +282,8 @@ For the "paste your notes" entry path. Raw, unstructured text or uploaded files 
 |---|---|---|---|
 | title | string | yes | |
 | kind | string | no | Accepted values: `interview_prep`, `performance_review`, `brag_doc`, `journal`, `meeting_notes`, `other` |
+| origin | string | no | Where the document came from. Default `career_input` (home page paste). `requirement_response` = freeform text entered during per-requirement review in the resume wizard |
+| job_listing_requirement_id | bigInteger | yes | FK → job_listing_requirements. Only populated when origin is `requirement_response` — traces this document back to the specific requirement that prompted the user to describe their experience |
 | file_path | string | yes | Relative storage path for uploaded files. Null for pasted text |
 | file_type | string | yes | Accepted values: `text`, `markdown`, `pdf`. Null for pasted text (treated as `text`) |
 | body | text | yes | The textual body. For pasted text, the literal pasted content. For uploaded text and markdown files, the file contents read into the column at upload time. Null for PDF uploads — the file at `file_path` is the source, sent directly to Claude as base64 at extraction time |
@@ -289,7 +291,7 @@ For the "paste your notes" entry path. Raw, unstructured text or uploaded files 
 | context_notes | text | yes | What occasion ("Interview prep for Stripe, Aug 2025") |
 | review_decisions | json | yes | **Being removed.** Added in the original 3-prep chunk to track "negative space" review decisions (rejected_tags, renamed_tags, etc.). The audit-trail design that replaced it represents decisions as `extracted_records` rows of types `tag` and `person`, making this column redundant. Scheduled for removal in milestone 4.6's cleanup chunk. |
 
-**Relationships.** `belongsToMany` accomplishments via `accomplishment_source_documents`. `belongsToMany` projects via `project_source_documents`. `morphedByMany` tags via `taggables`. `hasMany` extracted_records. `hasMany` ai_usage_events.
+**Relationships.** `belongsToMany` accomplishments via `accomplishment_source_documents`. `belongsToMany` projects via `project_source_documents`. `morphedByMany` tags via `taggables`. `hasMany` extracted_records. `hasMany` ai_usage_events. `belongsTo` requirement (via `job_listing_requirement_id`).
 
 **Source-document tagging is vestigial.** Source documents are schema-level taggable (the polymorphic join supports it) but the relationship is unused by the application. The AI extraction pipeline tags *entity drafts* (project, position, etc.) rather than source documents themselves; user review of those tags happens via the milestone-4.6 review pages. The `morphedByMany` definition on the Tag model and the `tags()` relationship on SourceDocument remain in place because removing them requires a separate migration to clean up taggables rows; this is a candidate for a future cleanup slice. Do not include source documents as a target for the manual tag picker.
 
@@ -444,6 +446,124 @@ Many-to-many between accomplishments and people, with a small bit of context per
 
 ---
 
+### Resume generation
+
+The tables that support the resume generation flow — capturing job listings, curating catalog entries for relevance, generating drafts, and producing formatted output files.
+
+#### `job_listings`
+
+Entry point to the resume generation flow. A job listing is a child of an organization (typically type `prospect`, though applying to a former employer is valid). Stores the raw pasted listing text and, optionally, AI-extracted structured data.
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| organization_id | bigInteger | no | FK → organizations |
+| role_title | string | no | |
+| body | text | no | The raw pasted listing text, preserved verbatim |
+| structured_data | json | yes | AI-extracted fields (requirements, nice-to-haves, responsibilities, etc.). Shape will evolve during dogfooding — JSON avoids premature column commitments |
+| source_url | string | yes | Where the listing was found |
+| location | string | yes | Free text — "Remote", "NYC (hybrid)", "San Francisco, CA" |
+| compensation_range | string | yes | Free text — "$120-150k", "competitive", "$80/hr". Free text rather than structured money fields because listing formats vary wildly and this data is for AI context, not arithmetic |
+| date_posted | date | yes | |
+| status | string | no | Accepted values: `active`, `closed`. Default `active` |
+
+**Relationships.** `belongsTo` organization. `hasMany` resume_drafts. `hasMany` job_listing_requirements.
+
+**Cascade.** `organization_id` → `cascade`.
+
+**Soft deletes.** Yes.
+
+#### `job_listing_requirements`
+
+AI-extracted requirements from the listing text. Requirements belong to the listing, not to any specific draft — multiple resume drafts against the same listing share the same set of requirements. Extracted once during the first `analyze_relevance` call; subsequent drafts reuse them.
+
+The `section` column captures which part of the listing the requirement came from; `category` classifies the type. Both are backed enums (`RequirementSection`, `RequirementCategory`).
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| job_listing_id | bigInteger | no | FK → job_listings |
+| category | string | no | Accepted values: see `RequirementCategory` enum (`technical_skill`, `framework`, `tool`, `experience`, `responsibility`, `domain_knowledge`, `soft_skill`, `credential`, `other`) |
+| section | string | no | Accepted values: see `RequirementSection` enum (`required`, `preferred`, `responsibility`) |
+| title | string | no | Short label for the requirement |
+| description | text | yes | Fuller description from the listing |
+| display_order | integer | no | Rendering order within section groups |
+
+**Relationships.** `belongsTo` job_listing. `hasMany` resume_selections (via `job_listing_requirement_id`). `hasMany` source_documents (via `job_listing_requirement_id` — documents created during per-requirement review).
+
+**Cascade.** `job_listing_id` → `cascade`.
+
+**Soft deletes.** No — lightweight reference records. Wiped and re-created by the `resume:re-analyze` artisan command when re-extraction is needed.
+
+#### `resume_drafts`
+
+One draft per resume generation attempt against a job listing. The `status` column drives the multi-page wizard flow: triage requirements → review selections per requirement → confirm → generate/edit draft → format final document. A listing can have multiple drafts over time (user wants a different angle, or re-generates after updating their catalog).
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| job_listing_id | bigInteger | no | FK → job_listings |
+| strategy_summary_generated | text | yes | AI-generated narrative angle for the application. Immutable — preserved for revert |
+| strategy_summary | text | yes | User-editable copy, starts as a clone of generated version |
+| requirement_decisions | json | yes | Maps requirement IDs to `"accepted"`/`"rejected"`. Wizard Screen 1 triage state. Null until user starts deciding |
+| generated_content | text | yes | AI-generated markdown resume. Immutable once written — this is the "original" for revert purposes. Null during the `selecting` phase |
+| user_content | text | yes | Starts as a copy of `generated_content`, user edits this. Null until generation completes |
+| format_preference | string | yes | Accepted values: `docx`, `pdf`. Default null |
+| status | string | no | Accepted values: `selecting`, `drafting`, `editing`, `approved`, `formatted`. Default `selecting` |
+
+**Relationships.** `belongsTo` job_listing. `hasMany` resume_selections. `hasMany` resume_artifacts.
+
+**Cascade.** `job_listing_id` → `cascade`.
+
+**Soft deletes.** Yes.
+
+**Notes.** Status transitions enforce the wizard flow: `selecting` → user triaging requirements and reviewing selections across three wizard screens (strategy & triage → per-requirement review → confirm); `drafting` → selections confirmed, AI generation in progress; `editing` → draft generated, user reviewing/editing; `approved` → ready for formatting; `formatted` → final document generated. The draft stays in `selecting` throughout all three wizard screens; status advances to `drafting` on final confirmation.
+
+Content is stored as two columns (`generated_content` and `user_content`) rather than a revisions table. MVP only needs "revert to original" — a full `resume_revisions` table is additive if users want undo history later.
+
+#### `resume_selections`
+
+Tracks which catalog entries the AI suggested for a resume and whether the user chose to include each one. This is the step 1 output — the curated set of experience that feeds into draft generation.
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| resume_draft_id | bigInteger | no | FK → resume_drafts |
+| job_listing_requirement_id | bigInteger | yes | FK → job_listing_requirements. Links the selection to the specific requirement it was suggested for. Null for general-strength suggestions not tied to a specific requirement |
+| selectable_type | string | no | Polymorphic model class: Position, Project, Accomplishment, CareerTheme, Tag, Link |
+| selectable_id | bigInteger | no | ID of the catalog record |
+| selected | boolean | no | Default `true`. True = include in resume, false = user excluded it |
+| ai_reasoning | text | yes | Why the AI suggested this entry — shown in the review UI to help the user decide |
+| user_relevance_note | text | yes | User's own note about how this entry relates to the requirement. Feeds into the draft generation prompt as additional context |
+| display_order | integer | no | Default `0`. Controls rendering order within each type group |
+
+**Relationships.** `belongsTo` resume_draft. `belongsTo` requirement (via `job_listing_requirement_id`). `morphTo` selectable.
+
+**Cascade.** `resume_draft_id` → `cascade`. `job_listing_requirement_id` → `set null` (selection survives if the requirement is removed during re-analysis).
+
+**Soft deletes.** No — lightweight decision records, similar to `accomplishment_collaborators`.
+
+**Indexes.** Compound index on `(resume_draft_id, selectable_type)` for fast grouped lookups. Compound index on `(selectable_type, selectable_id)` for the reverse query ("which resumes used this accomplishment?").
+
+**Notes.** The AI suggests entries across six entity types: positions (which jobs to include), projects and accomplishments (the evidence under each job), career themes (the narrative spine), tags (skills to highlight), and links where `is_personal_appearance = true` (portfolio items to feature). Each suggestion is linked to a specific requirement via `job_listing_requirement_id`, grouping the review UI by requirement rather than by entity type. The user toggles `selected` on each and can add a `user_relevance_note` explaining how the entry relates to the requirement — this note feeds into the draft generation prompt as additional context. At draft generation time, only `selected = true` entries under accepted requirements feed into the prompt.
+
+#### `resume_artifacts`
+
+Immutable formatted output files. Each artifact is a point-in-time snapshot of a rendered resume.
+
+| Column | Type | Nullable | Notes |
+|---|---|---|---|
+| resume_draft_id | bigInteger | no | FK → resume_drafts |
+| file_path | string | no | Relative storage path |
+| file_format | string | no | Accepted values: `docx`, `pdf` |
+| file_size_bytes | unsignedInteger | yes | Populated after generation |
+
+**Relationships.** `belongsTo` resume_draft.
+
+**Cascade.** `resume_draft_id` → `cascade`.
+
+**Soft deletes.** Yes — generated resumes are immutable artifacts per the mission doc.
+
+**Notes.** A draft can have multiple artifacts (user generates a .docx, then also wants a .pdf, or re-generates after editing). Each is a point-in-time snapshot. The `user_content` that produced it is on the parent `resume_drafts` row.
+
+---
+
 ## Cascade behavior summary
 
 For quick reference, here's every foreign key and what happens on parent deletion:
@@ -469,6 +589,14 @@ For quick reference, here's every foreign key and what happens on parent deletio
 | `accomplishment_collaborators` (both sides) | cascade |
 | `extracted_records.source_document_id` → source_documents | cascade |
 | `ai_usage_events.source_document_id` → source_documents | set null |
+| `ai_usage_events.resume_draft_id` → resume_drafts | set null |
+| `job_listings.organization_id` → organizations | cascade |
+| `job_listing_requirements.job_listing_id` → job_listings | cascade |
+| `resume_drafts.job_listing_id` → job_listings | cascade |
+| `resume_selections.resume_draft_id` → resume_drafts | cascade |
+| `resume_selections.job_listing_requirement_id` → job_listing_requirements | set null |
+| `resume_artifacts.resume_draft_id` → resume_drafts | cascade |
+| `source_documents.job_listing_requirement_id` → job_listing_requirements | set null |
 
 **A note on soft deletes vs. cascade.** When an entity is *soft-deleted* (`deleted_at` set), child rows are not affected — they remain pointing at a soft-deleted parent. Eloquent's default behavior excludes soft-deleted records from queries, so children effectively "orphan" until either the parent is restored (relationships work again) or the parent is hard-deleted (cascade fires). This is intentional: it makes accidental-delete recovery clean and predictable.
 
@@ -498,5 +626,5 @@ These are documented in the deferred features table in `06-planned-features.md`.
 - `project_relationships` (parent/child via `parent_project_id` covers MVP needs)
 - `decisions` (the `rationale` field on projects covers MVP needs)
 - `accomplishment_variants` (resume builder feature)
-- `job_listings`, `applications`, `generated_resumes` (resume builder feature)
+- `applications` (resume builder — application tracking milestone)
 - `references`, `certifications`, `education`

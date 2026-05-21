@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\ExtractedRecord;
+use App\Models\ResumeDraft;
 use App\Models\SourceDocument;
 use App\Services\Drafts\DraftConfirmationException;
 use App\Services\Drafts\DraftConfirmer;
@@ -89,6 +90,12 @@ class DraftReviewController extends Controller
             ?? $this->allDraftsQuery($sourceDocument)->first();
 
         if (! $first) {
+            $returnUrl = $this->resumeWizardReturnUrl($sourceDocument);
+            if ($returnUrl) {
+                return redirect($returnUrl)
+                    ->with('status', 'Extraction review complete — your new experience is in the catalog.');
+            }
+
             return redirect()
                 ->route('source-documents.show', $sourceDocument)
                 ->with('status', 'No drafts to review.');
@@ -212,14 +219,22 @@ class DraftReviewController extends Controller
         // Navigate to the next draft in queue order. Since rejected
         // drafts are now visible in the queue, we don't filter by
         // status here — the user can still see what they just rejected.
-        // If we're already at the last draft, stay on it so the user
-        // sees the status update.
-        $nextDraft = $this->findNextDraft($sourceDocument, $draft) ?? $draft;
+        // If we're already at the last draft and all reviews are done,
+        // check whether to return to the resume wizard.
+        $nextDraft = $this->findNextDraft($sourceDocument, $draft);
+
+        if (! $nextDraft && $this->isReviewComplete($sourceDocument)) {
+            $returnUrl = $this->resumeWizardReturnUrl($sourceDocument);
+            if ($returnUrl) {
+                return redirect($returnUrl)
+                    ->with('status', 'Extraction review complete — your new experience is in the catalog.');
+            }
+        }
 
         return redirect()
             ->route('source-documents.review.show', [
                 'sourceDocument' => $sourceDocument,
-                'draft' => $nextDraft->id,
+                'draft' => ($nextDraft ?? $draft)->id,
             ])
             ->with('status', $message);
     }
@@ -320,13 +335,22 @@ class DraftReviewController extends Controller
         }
 
         // Navigate to the next draft in queue. If we're at the end,
-        // stay on the current one so the user sees the confirmed badge.
-        $nextDraft = $this->findNextDraft($sourceDocument, $draft) ?? $draft;
+        // check whether this document came from the resume wizard —
+        // if so, send the user back to their application.
+        $nextDraft = $this->findNextDraft($sourceDocument, $draft);
+
+        if (! $nextDraft && $this->isReviewComplete($sourceDocument)) {
+            $returnUrl = $this->resumeWizardReturnUrl($sourceDocument);
+            if ($returnUrl) {
+                return redirect($returnUrl)
+                    ->with('status', 'Extraction review complete — your new experience is in the catalog.');
+            }
+        }
 
         return redirect()
             ->route('source-documents.review.show', [
                 'sourceDocument' => $sourceDocument,
-                'draft' => $nextDraft->id,
+                'draft' => ($nextDraft ?? $draft)->id,
             ])
             ->with('status', 'Draft confirmed.');
     }
@@ -420,5 +444,53 @@ class DraftReviewController extends Controller
             ->implode(' ');
 
         return "CASE {$cases} ELSE 99 END";
+    }
+
+    /**
+     * If the source document originated from the resume wizard's
+     * per-requirement freeform text input, return a redirect URL
+     * back to the requirement review page. Returns null for
+     * documents created through the normal career input flow.
+     *
+     * The return path traces:
+     *   source_document.job_listing_requirement_id → requirement
+     *     → job_listing → resume_draft (status = 'selecting')
+     *     → Screen 2 URL for that requirement
+     */
+    private function resumeWizardReturnUrl(SourceDocument $sourceDocument): ?string
+    {
+        if ($sourceDocument->origin !== 'requirement_response') {
+            return null;
+        }
+
+        if (! $sourceDocument->job_listing_requirement_id) {
+            return null;
+        }
+
+        $requirement = $sourceDocument->requirement;
+        if (! $requirement) {
+            return null;
+        }
+
+        $draft = ResumeDraft::where('job_listing_id', $requirement->job_listing_id)
+            ->where('status', 'selecting')
+            ->first();
+
+        if (! $draft) {
+            return null;
+        }
+
+        return route('resume-drafts.requirement', [$draft, $requirement]);
+    }
+
+    /**
+     * Check whether all review stages are complete for this
+     * document — no pending tags, people, links, or entity drafts.
+     */
+    private function isReviewComplete(SourceDocument $sourceDocument): bool
+    {
+        return ! $sourceDocument->extractedRecords()
+            ->where('status', 'pending')
+            ->exists();
     }
 }

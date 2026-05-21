@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Services\Extraction\ClaudeExtractionProvider;
 use App\Services\Extraction\ExtractionProvider;
 use App\Services\Extraction\FakeExtractionProvider;
+use App\Services\Resume\ResumeAiService;
 use Illuminate\Support\ServiceProvider;
 use InvalidArgumentException;
 
@@ -27,6 +28,15 @@ class ExtractionServiceProvider extends ServiceProvider
                     "Unknown extraction driver: {$driver}"
                 ),
             };
+        });
+
+        $this->app->bind(ResumeAiService::class, function ($app) {
+            return new ResumeAiService(
+                apiKey: (string) config('services.extraction.api_key', ''),
+                model: (string) config('services.extraction.model', 'claude-sonnet-4-6'),
+                inputCostPerMtokCents: (int) config('services.extraction.input_cost_per_mtok_cents', 300),
+                outputCostPerMtokCents: (int) config('services.extraction.output_cost_per_mtok_cents', 1500),
+            );
         });
     }
 

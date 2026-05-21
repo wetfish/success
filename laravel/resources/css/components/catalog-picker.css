@@ -1,0 +1,77 @@
+/* Catalog search picker for Screen 2 of the resume wizard.
+ * Same dropdown styling as the org-picker — positioned below
+ * the input, max 8 results, type badge per row. */
+
+ @layer components {
+    .catalog-picker {
+        position: relative;
+    }
+
+    .catalog-picker-dropdown {
+        position: absolute;
+        top: calc(100% + 0.25rem);
+        left: 0;
+        right: 0;
+        z-index: 10;
+        list-style: none;
+        padding: 0.25rem;
+        margin: 0;
+        background: var(--color-surface-input);
+        border: 1px solid var(--color-surface-input-border);
+        border-radius: 0.5rem;
+        box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+        max-height: 24rem;
+        overflow-y: auto;
+    }
+
+    .catalog-picker-result {
+        padding: 0.5rem 0.625rem;
+        border-radius: 0.375rem;
+        cursor: pointer;
+        transition: background-color 100ms ease-out;
+    }
+
+    .catalog-picker-result.is-highlighted {
+        background: var(--color-hover-overlay);
+    }
+
+    .catalog-picker-result-name {
+        display: flex;
+        align-items: baseline;
+        gap: 0.375rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: var(--color-text-primary);
+    }
+
+    .catalog-picker-result-badge {
+        font-size: 0.625rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 0.125rem 0.375rem;
+        border-radius: 0.25rem;
+        background: var(--color-surface-input-border);
+        color: var(--color-text-secondary);
+        flex-shrink: 0;
+    }
+
+    .catalog-picker-result-context {
+        font-size: 0.75rem;
+        color: var(--color-text-secondary);
+        margin-top: 0.125rem;
+        padding-left: calc(0.375rem + 3.5rem);
+    }
+
+    .catalog-picker-result--empty {
+        padding: 0.625rem;
+        color: var(--color-text-muted);
+        font-size: 0.875rem;
+        font-style: italic;
+        cursor: default;
+        text-align: center;
+    }
+    .catalog-picker-result--empty:hover {
+        background: transparent;
+    }
+}

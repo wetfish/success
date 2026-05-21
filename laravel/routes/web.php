@@ -4,12 +4,14 @@ use App\Http\Controllers\AccomplishmentController;
 use App\Http\Controllers\CareerInputController;
 use App\Http\Controllers\DraftMergeController;
 use App\Http\Controllers\DraftReviewController;
+use App\Http\Controllers\JobListingController;
 use App\Http\Controllers\LinkController;
 use App\Http\Controllers\LinkReviewController;
 use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\PersonController;
 use App\Http\Controllers\PositionController;
 use App\Http\Controllers\ProjectController;
+use App\Http\Controllers\ResumeDraftController;
 use App\Http\Controllers\SourceDocumentController;
 use App\Http\Controllers\TagAliasController;
 use App\Http\Controllers\TagController;
@@ -176,6 +178,17 @@ Route::middleware([RequireTagReviewComplete::class, RequirePersonReviewComplete:
         ->name('source-documents.review.merge.store');
 });
 
+/* Organization search and quick-create for the org picker.
+ * Must be declared BEFORE Route::resource — otherwise
+ * `organizations/search` matches `organizations/{organization}`
+ * with "search" as the ID. Same pattern as tags.search and
+ * people.search. */
+Route::get('organizations/search', [OrganizationController::class, 'search'])
+    ->name('organizations.search');
+
+Route::post('organizations/quick-store', [OrganizationController::class, 'quickStore'])
+    ->name('organizations.quick-store');
+
 Route::resource('organizations', OrganizationController::class);
 
 /* Positions are always created in the context of an organization. */
@@ -280,3 +293,79 @@ Route::get('people/search', [PersonController::class, 'search'])
     ->name('people.search');
 
 Route::resource('people', PersonController::class);
+
+/* Job listings — entry point to the resume generation flow.
+ * Top-level resource (not nested under organizations) because
+ * the org picker on the form handles the association, and a
+ * top-level route means users don't need to navigate into an
+ * org first to create a listing. */
+Route::resource('job-listings', JobListingController::class);
+
+/* Resume draft wizard routes.
+ * Three-screen wizard flow, all within the `selecting` status:
+ *
+ *   Screen 1 — Strategy & requirements triage
+ *     GET  /resume-drafts/{draft}                            → show (triage page)
+ *     POST /resume-drafts/{draft}/strategy                   → AJAX: save strategy
+ *     POST /resume-drafts/{draft}/requirements/{req}/decide  → AJAX: accept/reject
+ *
+ *   Screen 2 — Per-requirement selection review
+ *     GET  /resume-drafts/{draft}/requirements/{req}             → showRequirement
+ *     POST /resume-drafts/{draft}/requirements/{req}/selections  → add catalog entry
+ *     POST /resume-drafts/{draft}/requirements/{req}/experience  → submit freeform text
+ *     POST /resume-drafts/{draft}/selections/{sel}/toggle        → AJAX: include/exclude
+ *     POST /resume-drafts/{draft}/selections/{sel}/note          → AJAX: save relevance note
+ *
+ *   Screen 3 — Confirm & generate
+ *     GET  /resume-drafts/{draft}/confirm                    → confirmPage
+ *     POST /resume-drafts/{draft}/confirm                    → confirm (advance status)
+ *
+ * Entry point: POST from the job listing show page creates the draft
+ * and redirects to Screen 1. */
+Route::post('job-listings/{job_listing}/resume-drafts', [ResumeDraftController::class, 'create'])
+    ->name('resume-drafts.create');
+
+// Catalog search for adding entries to requirements on Screen 2.
+// Registered before the {resume_draft} show route so "catalog-search"
+// isn't captured as a resume_draft ID.
+Route::get('resume-drafts/catalog-search', [ResumeDraftController::class, 'catalogSearch'])
+    ->name('resume-drafts.catalog-search');
+
+// Screen 1: Strategy & requirements triage.
+Route::get('resume-drafts/{resume_draft}', [ResumeDraftController::class, 'show'])
+    ->name('resume-drafts.show');
+
+Route::post('resume-drafts/{resume_draft}/strategy', [ResumeDraftController::class, 'updateStrategy'])
+    ->name('resume-drafts.update-strategy');
+
+Route::post('resume-drafts/{resume_draft}/strategy/synthesize', [ResumeDraftController::class, 'synthesizeStrategy'])
+    ->name('resume-drafts.synthesize-strategy');
+
+Route::post('resume-drafts/{resume_draft}/requirements/{requirement}/decide', [ResumeDraftController::class, 'decideRequirement'])
+    ->name('resume-drafts.decide-requirement');
+
+// Screen 2: Per-requirement review.
+Route::get('resume-drafts/{resume_draft}/requirements/{requirement}', [ResumeDraftController::class, 'showRequirement'])
+    ->name('resume-drafts.requirement');
+
+Route::post('resume-drafts/{resume_draft}/requirements/{requirement}/selections', [ResumeDraftController::class, 'addSelection'])
+    ->name('resume-drafts.add-selection');
+
+Route::post('resume-drafts/{resume_draft}/requirements/{requirement}/experience', [ResumeDraftController::class, 'submitExperience'])
+    ->name('resume-drafts.submit-experience');
+
+Route::post('resume-drafts/{resume_draft}/selections/{selection}/toggle', [ResumeDraftController::class, 'toggle'])
+    ->name('resume-drafts.toggle');
+
+Route::delete('resume-drafts/{resume_draft}/selections/{selection}', [ResumeDraftController::class, 'removeSelection'])
+    ->name('resume-drafts.remove-selection');
+
+Route::post('resume-drafts/{resume_draft}/selections/{selection}/note', [ResumeDraftController::class, 'updateNote'])
+    ->name('resume-drafts.update-note');
+
+// Screen 3: Confirm & generate.
+Route::get('resume-drafts/{resume_draft}/confirm', [ResumeDraftController::class, 'confirmPage'])
+    ->name('resume-drafts.confirm-page');
+
+Route::post('resume-drafts/{resume_draft}/confirm', [ResumeDraftController::class, 'confirm'])
+    ->name('resume-drafts.confirm');

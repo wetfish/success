@@ -9,6 +9,10 @@
  * `@layer components` so they slot into Tailwind's layer cascade. */
 @import './components/tag-picker.css';
 @import './components/person-picker.css';
+@import './components/org-picker.css';
+@import './components/selection-review.css';
+@import './components/requirement-triage.css';
+@import './components/catalog-picker.css';
 
 @theme {
     --font-sans: ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
@@ -73,6 +77,10 @@ body {
 ::placeholder {
     color: var(--color-text-placeholder);
     opacity: 1;
+}
+
+a {
+    text-decoration: none;
 }
 
 @layer components {

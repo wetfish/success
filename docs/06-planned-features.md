@@ -73,19 +73,25 @@ AI extraction emits entity drafts only, carrying nested `tags` / `collaborators`
 
 **Cache tag statistics before SaaS launch.** The tag index page computes usage counts via a correlated subquery against `taggables` on every page load. Fine at MVP scale (hundreds of tags, a handful of references each), but it scans the full join table and will become a hotspot at scale. Add a `tag_statistics` cache table (or Redis-backed counter) before milestone 10 ships multi-user.
 
-### 5. Resume builder *(next)*
+### 5. Resume builder *(active)*
 
-**Intent:** Capture a job listing as a structured entity. Compare it against the user's catalog. Generate a tailored resume in two phases: a rough markdown draft for content review, then a professionally formatted .docx or .pdf. Save the generated resume as an immutable artifact tied to the application. Track application outcomes.
+**Intent:** Capture a job listing as a structured entity. Compare it against the user's catalog. Generate a tailored resume in three steps: AI-driven catalog relevance review, rough markdown draft for content editing, then a professionally formatted .docx or .pdf. Save the generated resume as an immutable artifact tied to the application.
 
-**Two-phase generation.** The rough draft lets the user verify content accuracy (which accomplishments were selected, how they're framed, what's included/excluded) before spending time and tokens on formatted output. Content review is cheap; formatting is expensive. Users iterate on the draft, then generate the final document once.
+**Three-step generation flow.** The flow adds a decision point before prose generation — the user reviews which catalog entries are relevant to the listing and curates what goes into the resume before the AI writes anything. This applies the "considered curation" philosophy from the extraction review wizard to output generation.
 
-**Proposed mini-slices:**
+1. **Catalog relevance review (multi-page wizard).** AI extracts requirements from the listing, produces a strategy summary, and maps catalog entries to specific requirements. The review is a three-screen wizard: (a) strategy editing and requirement triage — accept or reject each requirement with match-count visibility; (b) per-requirement selection review — one requirement per page, with catalog search and freeform text entry that feeds back into the catalog through the existing extraction pipeline; (c) confirmation summary. The wizard design reduces cognitive load (triage ~14 requirements, not ~47 selections) and closes the lifecycle loop (applying to jobs grows the catalog).
+2. **Rough draft generation and editing.** AI produces a markdown resume from the accepted selections under accepted requirements. User edits inline. Original AI output preserved in `generated_content` for revert; user edits stored in `user_content`.
+3. **Formatted document generation.** Approved draft is submitted to the AI for conversion to .docx or .pdf. Output saved as an immutable artifact.
 
-- **5.1 Prospect organization UI + job listing entity.** Schema for job listings (company, role title, requirements, nice-to-haves, responsibilities, compensation range, location, source URL, date posted). Job listings are children of prospect organizations. New UI for creating prospects and entering listing details — may include AI extraction of pasted listing text into structured fields.
-- **5.2 Catalog summarization service.** Serializes the user's relevant catalog data (work history, accomplishments, skills/tags, links with `is_personal_appearance`) into a prompt-friendly format for the AI. Not the entire DB dump — a compact, structured representation that fits within token budgets while preserving the information the AI needs to make relevance judgments.
-- **5.3 Rough draft generation.** AI comparison of job listing requirements against the catalog summary. Produces a plain-text markdown resume tailored to the listing. Review UI for editing, reordering, and approving the draft content before finalization.
-- **5.4 Finalized document generation.** Takes the approved markdown draft and produces a professionally formatted .docx or .pdf using a resume template. The template system may use the `docx` skill or a PDF generation pipeline.
-- **5.5 Application tracking.** Status tracking per application (draft, submitted, interviewing, offered, rejected, ghosted). Resume artifact storage — each generated resume is immutable and tied to a specific job listing + organization. Application history view.
+**Schema landed.** Five new tables (`job_listings`, `job_listing_requirements`, `resume_drafts`, `resume_selections`, `resume_artifacts`), a nullable `resume_draft_id` FK on `ai_usage_events`, and origin tracking on `source_documents`. See `01-database-schema.md` for full table definitions.
+
+**Mini-slices:**
+
+- **5.1 Job listing CRUD + organization picker** *(complete).* Top-level job listing page with autocomplete organization picker (select existing or auto-create as `prospect`). Listing form: role title, body text paste, optional fields (source URL, location, compensation range, date posted). Pure CRUD — no AI in this slice.
+- **5.2 Catalog summarization + relevance review** *(complete).* AI extracts requirements from the listing, produces a strategy summary, and maps catalog entries to specific requirements. Review is a three-screen wizard: (1) strategy & requirements triage — accept/reject/duplicate requirements with match counts, strategy synthesis; (2) per-requirement review — one requirement per page, catalog selections with include/exclude, catalog search by name and parent organization, freeform text entry that redirects to the extraction pipeline with auto-return; (3) confirm & generate — summary of all decisions with duplicate grouping, submit to advance to `drafting`. The freeform text entry on Screen 2 feeds back into the catalog through the existing extraction pipeline, so the catalog grows as a side effect of applying to jobs. Deferred for future polish: in-context modals for extraction review, inline source record editing, and catalog search preview.
+- **5.3 Rough draft generation + editing UI.** AI generates markdown resume from accepted selections. Editing UI with save. Revert to original. Status transitions: `selecting` → `drafting` → `editing` → `approved`.
+- **5.4 Formatted document generation.** Template-based .docx or .pdf from approved `user_content`. Artifact storage. Status transition: `approved` → `formatted`.
+- **5.5 Application tracking.** Status tracking per listing (applied, interviewing, offered, rejected, ghosted). Application history view. Additive — doesn't touch existing tables.
 
 ### 6. Interview prep
 
@@ -214,7 +220,7 @@ Things we explicitly considered and decided to build later. Each is designed-aro
 | Project-to-project relationships (depends_on, extends, etc.) | Self-nesting handles the most common case; explicit relationships matter for advanced framing | Add a `project_relationships` table later |
 | Decision logs | `rationale` field on projects covers 80% | Promote to its own table when interview prep features need richer structure |
 | Accomplishment variants (per-application rewrites) | Belongs with the resume builder | Build alongside the resume generator |
-| Job listings, applications, generated resumes | Resume builder milestone | Whole separate phase of the schema, additive |
+| Applications tracking table | Resume builder milestone 5.5 | Additive — status column on `job_listings` or a separate `applications` table |
 | References, certifications, education | Trivial flat tables; no schema risk | Add when needed |
 | User accounts / multi-tenancy | Single-user dogfood phase first; carrying nullable `user_id` columns with no users table would be misleading | When milestone 10 lands: add a `users` table, then add `user_id` foreign keys via migration to roughly ten entity tables (organizations, positions, projects, accomplishments, people, source_documents, career_themes, tags, etc.), backfilling all existing rows to point at the dogfood user |
 

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
@@ -32,6 +33,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 #[Fillable([
     'title',
     'kind',
+    'origin',
+    'job_listing_requirement_id',
     'file_path',
     'file_type',
     'body',
@@ -72,6 +75,17 @@ class SourceDocument extends Model
     public function aiUsageEvents(): HasMany
     {
         return $this->hasMany(AiUsageEvent::class);
+    }
+
+    /**
+     * The job listing requirement that prompted this document.
+     * Only populated when origin is 'requirement_response' —
+     * i.e., the user entered freeform text during per-requirement
+     * review in the resume wizard.
+     */
+    public function requirement(): BelongsTo
+    {
+        return $this->belongsTo(JobListingRequirement::class, 'job_listing_requirement_id');
     }
 
     public function isPdf(): bool
