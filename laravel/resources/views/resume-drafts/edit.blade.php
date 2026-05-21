@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', ($draft->isApproved() ? 'Approved draft' : 'Edit draft') . ' · ' . $jobListing->role_title)
+@section('title', ($draft->isEditing() ? 'Edit draft' : ($draft->isFormatted() ? 'Resume' : 'Approved draft')) . ' · ' . $jobListing->role_title)
 
 @section('content')
     <div class="mb-2">
@@ -12,24 +12,41 @@
     <div class="mb-8 flex items-start justify-between gap-4">
         <div>
             <h1 class="text-2xl font-semibold tracking-tight">
-                {{ $draft->isApproved() ? 'Approved draft' : 'Edit resume draft' }}
+                @if ($draft->isEditing())
+                    Edit resume draft
+                @elseif ($draft->isFormatted())
+                    Resume
+                @else
+                    Approved draft
+                @endif
             </h1>
             <p class="text-sm mt-1" style="color: var(--color-text-muted);">
-                @if ($draft->isApproved())
-                    This draft has been approved. Document formatting is coming in a future update.
-                @else
+                @if ($draft->isEditing())
                     Review and edit the AI-generated resume. When you're satisfied, approve it.
+                @elseif ($draft->isApproved())
+                    Approve looks good. Generate a formatted document to download.
+                @else
+                    Your formatted resume is ready for download.
                 @endif
             </p>
         </div>
 
+        @php
+            $badgeLabel = match (true) {
+                $draft->isEditing() => 'Editing',
+                $draft->isApproved() => 'Approved',
+                $draft->isFormatted() => 'Formatted',
+                default => $draft->status,
+            };
+            $badgeIsSuccess = $draft->isApproved() || $draft->isFormatted();
+        @endphp
         <span
             class="text-xs font-medium px-2 py-1 rounded shrink-0 mt-1"
-            style="background: {{ $draft->isApproved() ? 'var(--color-status-bg)' : 'var(--color-error-bg)' }};
-                   color: {{ $draft->isApproved() ? 'var(--color-accent)' : 'var(--color-error)' }};
-                   border: 1px solid {{ $draft->isApproved() ? 'var(--color-status-border)' : 'var(--color-error-border)' }};"
+            style="background: {{ $badgeIsSuccess ? 'var(--color-status-bg)' : 'var(--color-error-bg)' }};
+                   color: {{ $badgeIsSuccess ? 'var(--color-accent)' : 'var(--color-error)' }};
+                   border: 1px solid {{ $badgeIsSuccess ? 'var(--color-status-border)' : 'var(--color-error-border)' }};"
         >
-            {{ $draft->isApproved() ? 'Approved' : 'Editing' }}
+            {{ $badgeLabel }}
         </span>
     </div>
 
@@ -139,7 +156,7 @@
             </div>
         </div>
     @else
-        {{-- Approved: read-only content display --}}
+        {{-- Approved / Formatted: read-only content display --}}
         <div class="mb-4">
             <h2 class="field-label mb-2">Resume content</h2>
             <div
@@ -148,9 +165,58 @@
             >{{ $draft->user_content }}</div>
         </div>
 
-        <div class="pt-4 text-sm" style="border-top: 1px solid var(--color-surface-input-border); color: var(--color-text-muted);">
-            This draft was approved {{ $draft->updated_at->format('M j, Y \a\t g:ia') }}.
-            Document formatting will be available in a future update.
+        {{-- Document generation & downloads --}}
+        <div class="pt-4 mt-4" style="border-top: 1px solid var(--color-surface-input-border);">
+            @if ($draft->artifacts->isNotEmpty())
+                <h2 class="field-label mb-3">Generated documents</h2>
+                <div class="space-y-2 mb-4">
+                    @foreach ($draft->artifacts as $artifact)
+                        <div
+                            class="flex items-center justify-between rounded-lg border p-3"
+                            style="border-color: var(--color-surface-input-border); background: var(--color-surface-input);"
+                        >
+                            <div class="text-sm">
+                                <span class="font-medium">.{{ $artifact->file_format }}</span>
+                                <span style="color: var(--color-text-muted);">
+                                    · {{ number_format($artifact->file_size_bytes / 1024, 0) }} KB
+                                    · {{ $artifact->created_at->format('M j, Y g:ia') }}
+                                </span>
+                            </div>
+                            <a
+                                href="{{ route('resume-drafts.download-artifact', [$draft, $artifact]) }}"
+                                class="btn-primary text-sm"
+                            >
+                                Download
+                            </a>
+                        </div>
+                    @endforeach
+                </div>
+            @endif
+
+            <form method="POST" action="{{ route('resume-drafts.generate-document', $draft) }}">
+                @csrf
+                <div class="flex items-end gap-3 flex-wrap">
+                    <div>
+                        <label for="candidate_name" class="field-label mb-1">Your name</label>
+                        <input
+                            type="text"
+                            id="candidate_name"
+                            name="candidate_name"
+                            class="input @error('candidate_name') has-error @enderror"
+                            value="{{ old('candidate_name') }}"
+                            placeholder="Full name for the resume header"
+                            required
+                            style="min-width: 260px;"
+                        >
+                        @error('candidate_name')
+                            <p class="field-error">{{ $message }}</p>
+                        @enderror
+                    </div>
+                    <button type="submit" class="btn-primary">
+                        {{ $draft->artifacts->isNotEmpty() ? 'Regenerate .docx' : 'Generate .docx' }}
+                    </button>
+                </div>
+            </form>
         </div>
     @endif
 

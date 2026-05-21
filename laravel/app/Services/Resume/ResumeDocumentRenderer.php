@@ -5,6 +5,7 @@ namespace App\Services\Resume;
 use PhpOffice\PhpWord\PhpWord;
 use PhpOffice\PhpWord\IOFactory;
 use PhpOffice\PhpWord\SimpleType\Jc;
+use PhpOffice\PhpWord\Style\ListItem;
 use RuntimeException;
 
 /**
@@ -16,6 +17,11 @@ use RuntimeException;
  * The output targets US Letter paper with professional resume
  * styling: clean sans-serif typography, tight spacing, and a
  * print-optimized layout that fits on 1-2 pages.
+ *
+ * All text is passed through addText() or addListItemRun()->addText()
+ * rather than addListItem() directly, because addText() properly
+ * escapes XML entities (&, <, >, em-dashes, etc.) while addListItem()
+ * can produce corrupt XML with special characters.
  */
 class ResumeDocumentRenderer
 {
@@ -61,10 +67,16 @@ class ResumeDocumentRenderer
      *
      * @param  array  $spec  The structured spec from generateDocumentSpec().
      * @param  string  $outputPath  Absolute path for the output file.
+     * @param  string|null  $candidateName  Name to substitute for {{NAME}} placeholder.
      * @return int  File size in bytes.
      */
-    public function render(array $spec, string $outputPath): int
+    public function render(array $spec, string $outputPath, ?string $candidateName = null): int
     {
+        $name = $spec['name'] ?? '{{NAME}}';
+        if ($candidateName !== null && $candidateName !== '') {
+            $name = $candidateName;
+        }
+
         $phpWord = new PhpWord();
         $this->configureDefaults($phpWord);
 
@@ -77,7 +89,7 @@ class ResumeDocumentRenderer
             'pageSizeH' => 15840,   // US Letter height
         ]);
 
-        $this->renderName($section, $spec['name'] ?? '{{NAME}}');
+        $this->renderName($section, $name);
         $this->renderSummary($section, $spec['summary'] ?? '');
         $this->renderExperience($section, $spec['experience'] ?? []);
         $this->renderSkills($section, $spec['skills'] ?? []);
@@ -158,11 +170,7 @@ class ResumeDocumentRenderer
             }
 
             foreach ($entry['bullets'] ?? [] as $bullet) {
-                $section->addListItem($bullet, 0, self::FONT_BULLET, [
-                    'spaceAfter' => 40,
-                ], [
-                    'listType' => \PhpOffice\PhpWord\Style\ListItem::TYPE_BULLET_FILLED,
-                ]);
+                $this->addBulletItem($section, $bullet, self::FONT_BULLET);
             }
         }
     }
@@ -216,13 +224,24 @@ class ResumeDocumentRenderer
             $this->addSectionHeading($section, $heading);
 
             foreach ($items as $item) {
-                $section->addListItem($item, 0, self::FONT_SMALL, [
-                    'spaceAfter' => 40,
-                ], [
-                    'listType' => \PhpOffice\PhpWord\Style\ListItem::TYPE_BULLET_FILLED,
-                ]);
+                $this->addBulletItem($section, $item, self::FONT_SMALL);
             }
         }
+    }
+
+    /**
+     * Add a bullet list item using addListItemRun() + addText().
+     * This path properly escapes XML entities (& < > — etc.),
+     * unlike addListItem() which can produce corrupt XML.
+     */
+    private function addBulletItem($section, string $text, array $fontStyle): void
+    {
+        $listItemRun = $section->addListItemRun(0, [
+            'listType' => ListItem::TYPE_BULLET_FILLED,
+        ], [
+            'spaceAfter' => 40,
+        ]);
+        $listItemRun->addText($text, $fontStyle);
     }
 
     /**

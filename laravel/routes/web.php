@@ -396,3 +396,10 @@ Route::post('resume-drafts/{resume_draft}/approve', [ResumeDraftController::clas
 
 Route::post('resume-drafts/{resume_draft}/revise', [ResumeDraftController::class, 'reviseSelections'])
     ->name('resume-drafts.revise-selections');
+
+// Document generation & download.
+Route::post('resume-drafts/{resume_draft}/generate-document', [ResumeDraftController::class, 'generateDocument'])
+    ->name('resume-drafts.generate-document');
+
+Route::get('resume-drafts/{resume_draft}/artifacts/{artifact}/download', [ResumeDraftController::class, 'downloadArtifact'])
+    ->name('resume-drafts.download-artifact');

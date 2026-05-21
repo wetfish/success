@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\JobListing;
 use App\Models\JobListingRequirement;
+use App\Models\ResumeArtifact;
 use App\Models\ResumeDraft;
 use App\Models\ResumeSelection;
 use App\Models\SourceDocument;
@@ -13,12 +14,14 @@ use App\Services\Extraction\ExtractionProvider;
 use App\Services\Resume\CatalogSummarizer;
 use App\Services\Resume\DraftPromptBuilder;
 use App\Services\Resume\ResumeAiService;
+use App\Services\Resume\ResumeDocumentRenderer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\View\View;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Throwable;
 
 /**
@@ -187,7 +190,7 @@ class ResumeDraftController extends Controller
      */
     public function show(ResumeDraft $resumeDraft): View|RedirectResponse
     {
-        if ($resumeDraft->isEditing() || $resumeDraft->isApproved()) {
+        if ($resumeDraft->isEditing() || $resumeDraft->isApproved() || $resumeDraft->isFormatted()) {
             return redirect()->route('resume-drafts.edit', $resumeDraft);
         }
 
@@ -963,7 +966,7 @@ class ResumeDraftController extends Controller
                 ->with('status', 'Draft generation is still in progress.');
         }
 
-        $resumeDraft->load('jobListing.organization');
+        $resumeDraft->load(['jobListing.organization', 'artifacts' => fn ($q) => $q->orderByDesc('created_at')]);
 
         return view('resume-drafts.edit', [
             'draft' => $resumeDraft,
@@ -1057,6 +1060,130 @@ class ResumeDraftController extends Controller
         return redirect()
             ->route('resume-drafts.show', $resumeDraft)
             ->with('status', 'Draft discarded — revise your selections and generate again.');
+    }
+
+    // -----------------------------------------------------------------
+    // Document generation
+    // -----------------------------------------------------------------
+
+    /**
+     * Generate a formatted .docx document from the approved draft.
+     * Calls the AI to parse the markdown into a structured spec,
+     * then renders it through PhpWord. Stores the result as a
+     * ResumeArtifact and advances status to `formatted`.
+     */
+    public function generateDocument(
+        ResumeDraft $resumeDraft,
+        Request $request,
+        ResumeAiService $aiService,
+        ResumeDocumentRenderer $renderer,
+        AiUsageTracker $tracker,
+    ): RedirectResponse {
+        if (! $resumeDraft->isApproved() && ! $resumeDraft->isFormatted()) {
+            return redirect()
+                ->route('resume-drafts.edit', $resumeDraft)
+                ->with('error', 'Approve the draft before generating a document.');
+        }
+
+        $validated = $request->validate([
+            'candidate_name' => ['required', 'string', 'max:200'],
+        ]);
+
+        try {
+            $spec = $aiService->generateDocumentSpec($resumeDraft->user_content);
+        } catch (Throwable $e) {
+            Log::error('Document spec generation failed', [
+                'resume_draft_id' => $resumeDraft->id,
+                'exception' => $e->getMessage(),
+            ]);
+
+            $tracker->recordFailure(
+                provider: 'claude',
+                model: config('services.extraction.model', 'claude-sonnet-4-6'),
+                operation: 'generate_document_spec',
+                errorMessage: $e->getMessage(),
+                resumeDraft: $resumeDraft,
+            );
+
+            return redirect()
+                ->route('resume-drafts.edit', $resumeDraft)
+                ->with('error', 'Document generation failed — please try again.');
+        }
+
+        // Track usage from the spec generation call.
+        if (isset($spec['_usage'])) {
+            $usage = $spec['_usage'];
+            \App\Models\AiUsageEvent::create([
+                'provider' => 'claude',
+                'model' => $usage['model'],
+                'operation' => 'generate_document_spec',
+                'resume_draft_id' => $resumeDraft->id,
+                'input_tokens' => $usage['input_tokens'],
+                'output_tokens' => $usage['output_tokens'],
+                'cost_cents' => $usage['cost_cents'],
+                'success' => true,
+            ]);
+            unset($spec['_usage']);
+        }
+
+        // Render the spec into a .docx file.
+        $filename = 'resume_' . $resumeDraft->id . '_' . time() . '.docx';
+        $relativePath = 'resume-artifacts/' . $filename;
+        $absolutePath = storage_path('app/' . $relativePath);
+
+        try {
+            $fileSize = $renderer->render($spec, $absolutePath, $validated['candidate_name']);
+        } catch (Throwable $e) {
+            Log::error('Document rendering failed', [
+                'resume_draft_id' => $resumeDraft->id,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return redirect()
+                ->route('resume-drafts.edit', $resumeDraft)
+                ->with('error', 'Document rendering failed — please try again.');
+        }
+
+        $artifact = ResumeArtifact::create([
+            'resume_draft_id' => $resumeDraft->id,
+            'file_path' => $relativePath,
+            'file_format' => 'docx',
+            'file_size_bytes' => $fileSize,
+        ]);
+
+        if ($resumeDraft->isApproved()) {
+            $resumeDraft->update(['status' => 'formatted']);
+        }
+
+        return redirect()
+            ->route('resume-drafts.edit', $resumeDraft)
+            ->with('status', 'Document generated — download it below.');
+    }
+
+    /**
+     * Download a generated resume artifact.
+     */
+    public function downloadArtifact(
+        ResumeDraft $resumeDraft,
+        ResumeArtifact $artifact,
+    ): BinaryFileResponse|RedirectResponse {
+        if ($artifact->resume_draft_id !== $resumeDraft->id) {
+            abort(404);
+        }
+
+        $absolutePath = storage_path('app/' . $artifact->file_path);
+
+        if (! file_exists($absolutePath)) {
+            return redirect()
+                ->route('resume-drafts.edit', $resumeDraft)
+                ->with('error', 'The artifact file could not be found.');
+        }
+
+        $resumeDraft->load('jobListing');
+        $downloadName = str_replace(' ', '_', $resumeDraft->jobListing->role_title)
+            . '_resume.' . $artifact->file_format;
+
+        return response()->download($absolutePath, $downloadName);
     }
 
     // -----------------------------------------------------------------
