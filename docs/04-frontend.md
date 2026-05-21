@@ -198,3 +198,33 @@ The merge UI presents the existing record's value and the draft's value side-by-
 **Candidate picker.** When duplicate detection returns more than one match, the merge route first renders a small picker — a list of existing records each with a "Merge into this one" link. The link sets `?candidate_id=` in the URL and re-enters the same view, which then renders the editor. Single-candidate merges skip the picker entirely.
 
 The pattern uses inline-IIFE script blocks consistent with the rest of the app (see Inline JavaScript above). No new framework, no separate JS file yet — extract if a second editor of this shape lands.
+
+## Resume wizard components
+
+Three JS modules and their CSS counterparts power the resume wizard. All follow the same conventions as the existing pickers and review pages: data-attribute mounting, optimistic AJAX, CSRF token from the meta tag.
+
+### requirement-triage.js + requirement-triage.css
+
+Mounts on `[data-requirement-triage]`. Manages Screen 1 — Accept/Skip/Duplicate buttons on requirement cards, progress tracking, continue-button gating, strategy save/revert, and strategy synthesis.
+
+The duplicate flow is the most complex interaction: clicking "Duplicate" reveals an inline `<select>` populated dynamically from currently accepted requirements. Selecting a primary fires the AJAX call and updates the card badge to "Duplicate of: [title]". The `applyDecisionState` function handles all three decision types, toggling card classes (`triage-card--accepted`, `triage-card--rejected`, `triage-card--duplicate`), badge visibility, button disabled states, and title link interactivity.
+
+Strategy synthesis reuses `ExtractionProvider::synthesize()` — the same service as the merge editor. The result populates the textarea but isn't auto-saved; the user must click "Save strategy" to persist it.
+
+### selection-review.js + selection-review.css
+
+Mounts on `[data-selection-review]`. Manages Screen 2 selection cards — Include/Exclude toggles, Remove for user-added entries, and debounced auto-save for relevance notes (800ms after the user stops typing).
+
+The note auto-save replaces the original manual "Save note" button. Status text ("Typing…", "Saving…", "Saved") appears in an absolutely positioned span within a padded container to avoid layout reflow. Textareas auto-resize to fit content on mount and on input via `style.height = 'auto'; style.height = scrollHeight + 'px'`.
+
+AI-suggested cards (those with `ai_reasoning`) get Include/Exclude; user-added cards (no `ai_reasoning`) get a Remove button that fires `DELETE` and removes the card from the DOM.
+
+### catalog-picker.js + catalog-picker.css
+
+Mounts on `[data-catalog-picker]`. Type-ahead autocomplete for adding catalog entries to a requirement. Simpler than the tag/person/org pickers — single-action (no chips, no multi-select). Selecting a result submits a hidden form, which creates a `ResumeSelection` and reloads the page.
+
+The dropdown renders type badges (`POSITION`, `PROJECT`, `ACCOMPLISHMENT`) and context lines (parent organization/position). 150ms debounce, keyboard navigation (arrows + enter + escape), click-outside-closes, async race protection via request token.
+
+### Resume wizard banner (_resume-wizard-banner.blade.php)
+
+Shared partial included in all seven extraction review pages (extraction preview, source document show, tag review, person review, link review, entity draft review, merge). Renders an accent-bordered banner when the document has `origin = 'requirement_response'`, reminding the user which requirement prompted this extraction and that they'll return to the wizard when done. The `DraftReviewController` handles the auto-redirect back to Screen 2 when all drafts are reviewed.

@@ -281,10 +281,8 @@ class ResumeDraftController extends Controller
     }
 
     /**
-     * AJAX: accept, reject, or mark a requirement as duplicate.
-     * Stores the decision in the draft's `requirement_decisions`
-     * JSON column. Duplicates store {"duplicate_of": <id>} linking
-     * to the primary accepted requirement.
+     * AJAX: accept or reject a requirement. Stores the decision in
+     * the draft's `requirement_decisions` JSON column.
      */
     public function decideRequirement(
         ResumeDraft $resumeDraft,
@@ -310,8 +308,6 @@ class ResumeDraftController extends Controller
         if ($validated['decision'] === 'duplicate') {
             $primaryId = $validated['duplicate_of'] ?? null;
 
-            // Validate the primary requirement exists on this listing
-            // and is accepted.
             if (! $primaryId) {
                 return response()->json(['error' => 'Select which requirement this is a duplicate of.'], 422);
             }
@@ -441,7 +437,6 @@ class ResumeDraftController extends Controller
         $decisions = $resumeDraft->requirement_decisions ?? [];
 
         // Build the ordered list of accepted requirements for navigation.
-        // Duplicates are excluded — they inherit the primary's selections.
         $acceptedRequirements = $jobListing->requirements
             ->sortBy('display_order')
             ->filter(fn ($r) => ($decisions[$r->id] ?? null) === 'accepted')
@@ -449,7 +444,7 @@ class ResumeDraftController extends Controller
 
         $currentIndex = $acceptedRequirements->search(fn ($r) => $r->id === $requirement->id);
 
-        // If this requirement isn't accepted (or is a duplicate), redirect to Screen 1.
+        // If this requirement isn't accepted, redirect to Screen 1.
         if ($currentIndex === false) {
             return redirect()->route('resume-drafts.show', $resumeDraft);
         }
@@ -499,6 +494,31 @@ class ResumeDraftController extends Controller
             'ok' => true,
             'selected' => $selection->selected,
         ]);
+    }
+
+    /**
+     * AJAX: remove a user-added selection. Only selections without
+     * AI reasoning can be removed — AI-suggested entries are paid
+     * for and should be preserved (use toggle to exclude them
+     * instead). Deletes the row entirely.
+     */
+    public function removeSelection(ResumeDraft $resumeDraft, ResumeSelection $selection): JsonResponse
+    {
+        if ($selection->resume_draft_id !== $resumeDraft->id) {
+            return response()->json(['error' => 'Selection does not belong to this draft.'], 404);
+        }
+
+        if (! $resumeDraft->isSelecting()) {
+            return response()->json(['error' => 'Selections are locked — this draft has already been confirmed.'], 422);
+        }
+
+        if ($selection->ai_reasoning !== null) {
+            return response()->json(['error' => 'AI-suggested entries cannot be removed — use Exclude instead.'], 422);
+        }
+
+        $selection->delete();
+
+        return response()->json(['ok' => true]);
     }
 
     /**
@@ -646,18 +666,6 @@ class ResumeDraftController extends Controller
             ->filter(fn ($r) => ($decisions[$r->id] ?? null) === 'accepted')
             ->values();
 
-        // Build a map of primary requirement ID → list of duplicate requirement titles.
-        $duplicatesMap = [];
-        foreach ($decisions as $id => $decision) {
-            if (is_array($decision) && isset($decision['duplicate_of'])) {
-                $primaryId = $decision['duplicate_of'];
-                $dupRequirement = $jobListing->requirements->firstWhere('id', $id);
-                if ($dupRequirement) {
-                    $duplicatesMap[$primaryId][] = $dupRequirement->title;
-                }
-            }
-        }
-
         // Count included selections per accepted requirement.
         $includedCounts = $resumeDraft->selections()
             ->where('selected', true)
@@ -681,7 +689,6 @@ class ResumeDraftController extends Controller
             'acceptedRequirements' => $acceptedRequirements,
             'includedCounts' => $includedCounts,
             'experienceCounts' => $experienceCounts,
-            'duplicatesMap' => $duplicatesMap,
         ]);
     }
 
@@ -702,8 +709,16 @@ class ResumeDraftController extends Controller
         // one included selection across the whole draft. Duplicates
         // inherit the primary's selections so they count too.
         $decisions = $resumeDraft->requirement_decisions ?? [];
-        $acceptedIds = $this->acceptedRequirementIds($decisions);
-        $activeIds = $this->activeRequirementIds($decisions);
+        $acceptedIds = collect($decisions)
+            ->filter(fn ($d) => $d === 'accepted')
+            ->keys()
+            ->all();
+
+        // Active IDs include both accepted and duplicates.
+        $activeIds = collect($decisions)
+            ->filter(fn ($d) => $d === 'accepted' || (is_array($d) && isset($d['duplicate_of'])))
+            ->keys()
+            ->all();
 
         if (empty($acceptedIds)) {
             return redirect()
@@ -758,48 +773,6 @@ class ResumeDraftController extends Controller
         }
 
         return $sections;
-    }
-
-    /**
-     * Interpret a decision value from the requirement_decisions JSON.
-     * Returns 'accepted', 'rejected', 'duplicate', or null.
-     *
-     * Decision format:
-     *   "accepted"                — accepted for review
-     *   "rejected"                — skipped
-     *   {"duplicate_of": <id>}    — duplicate of another requirement
-     */
-    private function decisionType(mixed $decision): ?string
-    {
-        if ($decision === 'accepted') return 'accepted';
-        if ($decision === 'rejected') return 'rejected';
-        if (is_array($decision) && isset($decision['duplicate_of'])) return 'duplicate';
-        return null;
-    }
-
-    /**
-     * Get the IDs of all accepted requirements (not duplicates).
-     * Used for Screen 2 navigation and confirm validation.
-     */
-    private function acceptedRequirementIds(array $decisions): array
-    {
-        return collect($decisions)
-            ->filter(fn ($d) => $d === 'accepted')
-            ->keys()
-            ->all();
-    }
-
-    /**
-     * Get all "active" requirement IDs — both accepted and duplicates.
-     * Used for confirm validation (both contribute selections to the
-     * resume) and for draft generation (both feed into the prompt).
-     */
-    private function activeRequirementIds(array $decisions): array
-    {
-        return collect($decisions)
-            ->filter(fn ($d) => $d === 'accepted' || (is_array($d) && isset($d['duplicate_of'])))
-            ->keys()
-            ->all();
     }
 
     /**
