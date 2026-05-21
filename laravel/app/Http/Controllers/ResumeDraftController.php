@@ -673,9 +673,12 @@ class ResumeDraftController extends Controller
     // -----------------------------------------------------------------
 
     /**
-     * Screen 3: Confirmation summary. Shows a compact overview of
-     * all accepted requirements, their included selection counts,
-     * and the strategy summary (read-only at this point).
+     * Screen 3: Confirmation summary. Shows accepted requirements
+     * with their included selections and user notes, the strategy
+     * summary (editable via synthesis), and duplicate groupings.
+     * This is the user's last chance to review everything before
+     * generation — the notes they wrote during review are visible
+     * here so they can verify the AI will receive the right context.
      */
     public function confirmPage(ResumeDraft $resumeDraft): View|RedirectResponse
     {
@@ -693,14 +696,48 @@ class ResumeDraftController extends Controller
             ->filter(fn ($r) => ($decisions[$r->id] ?? null) === 'accepted')
             ->values();
 
-        // Count included selections per accepted requirement.
-        $includedCounts = $resumeDraft->selections()
-            ->where('selected', true)
-            ->whereIn('job_listing_requirement_id', $acceptedRequirements->pluck('id'))
-            ->selectRaw('job_listing_requirement_id, count(*) as total')
-            ->groupBy('job_listing_requirement_id')
-            ->pluck('total', 'job_listing_requirement_id')
+        // Build duplicate map: primary ID → array of duplicate titles.
+        $duplicatesMap = [];
+        foreach ($decisions as $reqId => $decision) {
+            if (is_array($decision) && isset($decision['duplicate_of'])) {
+                $primaryId = $decision['duplicate_of'];
+                $dupReq = $jobListing->requirements->firstWhere('id', $reqId);
+                if ($dupReq) {
+                    $duplicatesMap[$primaryId][] = $dupReq->title;
+                }
+            }
+        }
+
+        // Collect all active requirement IDs (accepted + duplicates)
+        // so we load selections from both.
+        $activeIds = collect($decisions)
+            ->filter(fn ($d) => $d === 'accepted' || (is_array($d) && isset($d['duplicate_of'])))
+            ->keys()
             ->all();
+
+        // Load included selections with their selectables, grouped by requirement.
+        $selections = $resumeDraft->selections()
+            ->where('selected', true)
+            ->whereIn('job_listing_requirement_id', $activeIds)
+            ->with('selectable')
+            ->orderBy('display_order')
+            ->get()
+            ->groupBy('job_listing_requirement_id');
+
+        // Count included selections per accepted requirement (including
+        // selections from duplicate requirements that inherit to the primary).
+        $includedCounts = [];
+        foreach ($acceptedRequirements as $req) {
+            $count = ($selections->get($req->id)?->count() ?? 0);
+            // Add counts from duplicates that point to this primary.
+            $dupIds = collect($decisions)
+                ->filter(fn ($d) => is_array($d) && ($d['duplicate_of'] ?? null) === $req->id)
+                ->keys();
+            foreach ($dupIds as $dupId) {
+                $count += ($selections->get($dupId)?->count() ?? 0);
+            }
+            $includedCounts[$req->id] = $count;
+        }
 
         // Count source documents created during per-requirement review.
         $experienceCounts = SourceDocument::where('origin', 'requirement_response')
@@ -714,8 +751,96 @@ class ResumeDraftController extends Controller
             'draft' => $resumeDraft,
             'jobListing' => $jobListing,
             'acceptedRequirements' => $acceptedRequirements,
+            'selections' => $selections,
             'includedCounts' => $includedCounts,
             'experienceCounts' => $experienceCounts,
+            'duplicatesMap' => $duplicatesMap,
+        ]);
+    }
+
+    /**
+     * AJAX: synthesize all user relevance notes into an updated
+     * strategy summary. Collects every user_relevance_note from
+     * included selections, groups them by requirement title, and
+     * sends them to the AI along with the current strategy to
+     * produce a refined version.
+     */
+    public function synthesizeNotes(
+        ResumeDraft $resumeDraft,
+        ResumeAiService $aiService,
+        AiUsageTracker $tracker,
+    ): JsonResponse {
+        if (! $resumeDraft->isSelecting()) {
+            return response()->json(['error' => 'Strategy is locked — this draft has already been confirmed.'], 422);
+        }
+
+        $resumeDraft->load(['jobListing.requirements']);
+        $decisions = $resumeDraft->requirement_decisions ?? [];
+
+        // Collect active requirement IDs (accepted + duplicates).
+        $activeIds = collect($decisions)
+            ->filter(fn ($d) => $d === 'accepted' || (is_array($d) && isset($d['duplicate_of'])))
+            ->keys()
+            ->all();
+
+        // Load included selections that have user notes.
+        $selections = $resumeDraft->selections()
+            ->where('selected', true)
+            ->whereIn('job_listing_requirement_id', $activeIds)
+            ->whereNotNull('user_relevance_note')
+            ->where('user_relevance_note', '!=', '')
+            ->with('requirement')
+            ->orderBy('job_listing_requirement_id')
+            ->orderBy('display_order')
+            ->get();
+
+        if ($selections->isEmpty()) {
+            return response()->json([
+                'error' => 'No user notes found. Add relevance notes during per-requirement review first.',
+            ], 422);
+        }
+
+        // Build structured notes context grouped by requirement.
+        $notesByReq = $selections->groupBy(fn ($s) => $s->requirement?->title ?? 'General');
+        $notesText = $notesByReq->map(function ($group, $reqTitle) {
+            $notes = $group->pluck('user_relevance_note')->implode("\n- ");
+
+            return "### {$reqTitle}\n- {$notes}";
+        })->implode("\n\n");
+
+        try {
+            $result = $aiService->synthesizeNotesIntoStrategy(
+                $resumeDraft->strategy_summary,
+                $notesText,
+                $resumeDraft->jobListing->role_title,
+            );
+        } catch (\Throwable $e) {
+            Log::error('Strategy note synthesis failed', [
+                'resume_draft_id' => $resumeDraft->id,
+                'exception' => $e->getMessage(),
+            ]);
+
+            $tracker->recordFailure(
+                provider: 'claude',
+                model: config('services.extraction.model', 'claude-sonnet-4-6'),
+                operation: 'synthesize_notes',
+                errorMessage: $e->getMessage(),
+                resumeDraft: $resumeDraft,
+            );
+
+            return response()->json([
+                'error' => 'Synthesis failed — try again, or edit the strategy manually.',
+            ], 502);
+        }
+
+        $tracker->recordSynthesis($result, 'claude');
+
+        // Save the synthesized strategy.
+        $resumeDraft->update(['strategy_summary' => $result->description]);
+
+        return response()->json([
+            'ok' => true,
+            'synthesized' => $result->description,
         ]);
     }
 

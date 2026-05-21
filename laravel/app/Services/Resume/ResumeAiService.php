@@ -3,6 +3,7 @@
 namespace App\Services\Resume;
 
 use App\Enums\RequirementCategory;
+use App\Services\Extraction\SynthesisResult;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
@@ -141,10 +142,93 @@ class ResumeAiService
         );
     }
 
+    /**
+     * Synthesize the user's relevance notes from the review process
+     * into an updated strategy summary. Takes the current strategy
+     * and all user notes, and produces a refined strategy that
+     * incorporates the context the user added during review.
+     *
+     * Returns a SynthesisResult (reusing the extraction value object
+     * since it has the right shape: text + tokens + cost).
+     */
+    public function synthesizeNotesIntoStrategy(
+        string $currentStrategy,
+        string $notesContext,
+        string $roleTitle,
+    ): SynthesisResult {
+        $userMessage = <<<MESSAGE
+        ## Current Strategy
+
+        {$currentStrategy}
+
+        ---
+
+        ## User Notes from Review
+
+        These are the candidate's own notes explaining how their experience connects to each requirement for the "{$roleTitle}" role:
+
+        {$notesContext}
+        MESSAGE;
+
+        $system = <<<'PROMPT'
+You are a career strategist refining a resume strategy. The candidate has reviewed their experience against a job listing's requirements and written notes explaining how each piece of evidence connects. Your job is to produce an updated strategy summary that incorporates the candidate's framing.
+
+Rules:
+- Produce 3-6 sentences describing the recommended narrative angle for the resume.
+- Incorporate specific connections, framing, and emphasis from the user's notes — they've done the analytical work of linking their experience to requirements.
+- Preserve anything from the current strategy that still holds, but update or extend it with what the notes reveal.
+- Be specific — reference actual experiences and actual requirements, not generic strengths.
+- Return only the updated strategy text. No preamble, no explanation, no quotes.
+PROMPT;
+
+        $messages = [['role' => 'user', 'content' => $userMessage]];
+
+        try {
+            $response = $this->client()->post('/v1/messages', [
+                'model' => $this->model,
+                'max_tokens' => 1500,
+                'system' => $system,
+                'messages' => $messages,
+            ]);
+        } catch (Throwable $e) {
+            throw new RuntimeException(
+                "Strategy synthesis failed: {$e->getMessage()}", 0, $e
+            );
+        }
+
+        if (! $response->successful()) {
+            throw new RuntimeException(
+                "Strategy synthesis returned {$response->status()}: " . $response->body()
+            );
+        }
+
+        $body = $response->json();
+        $text = $this->extractTextFromResponse($body);
+        $inputTokens = (int) ($body['usage']['input_tokens'] ?? 0);
+        $outputTokens = (int) ($body['usage']['output_tokens'] ?? 0);
+
+        return new SynthesisResult(
+            description: trim($text),
+            inputTokens: $inputTokens,
+            outputTokens: $outputTokens,
+            costCents: $this->computeCost($inputTokens, $outputTokens),
+            model: $this->model,
+        );
+    }
+
     private function draftSystemPrompt(): string
     {
         return <<<'PROMPT'
 You are a professional resume writer. You will receive a job listing, a resume strategy, and a set of requirements with the candidate's curated evidence for each. Your job is to produce a polished, tailored resume in markdown.
+
+## Priority of inputs
+
+The candidate has manually reviewed every piece of evidence and written their own notes explaining how their experience connects to each requirement. These inputs are your primary source of truth, in this order:
+
+1. **Strategy summary** — the overall narrative angle. This is the structural spine of the resume. Every section should serve this story.
+2. **User notes** (labeled "User note:" in the evidence) — the candidate's own framing of how each piece of evidence relates to the requirement. These override AI reasoning. When a user note says to emphasize, reframe, or connect something in a specific way, do exactly that.
+3. **Evidence details** (accomplishment descriptions, project outcomes, impact metrics) — the raw material for resume bullets.
+4. **AI reasoning** (labeled "Relevance:" in the evidence) — useful for context but subordinate to user notes. When a user note and AI reasoning disagree on framing, the user note wins.
 
 ## Output structure
 
@@ -158,8 +242,7 @@ Produce the resume as clean markdown with the following sections in order:
    - Only include positions, projects, and accomplishments that appear in the provided evidence. Do not invent or embellish.
    - Prioritize accomplishments with concrete impact metrics — lead with the number.
    - Each bullet should be 1-2 sentences. Concise, active voice, past tense for completed work, present tense for current roles.
-   - Tailor the framing to the target role. The same accomplishment should read differently for a frontend role vs a platform engineering role. Use the requirement context and relevance notes to guide emphasis.
-   - If a user relevance note says to emphasize or frame something a specific way, follow that guidance — the user knows their story better than you do.
+   - Tailor the framing to the target role using the user notes as your guide. The user has already done the work of connecting their experience to the requirements — translate their framing into polished resume language.
    - When multiple requirements map to the same position, weave them together naturally rather than repeating the position.
    - Omit positions that have no selected evidence beneath them.
 
@@ -182,6 +265,7 @@ Produce the resume as clean markdown with the following sections in order:
 - Do not add a cover letter, objective statement, or references section.
 - Do not include explanatory comments or meta-text — output only the resume markdown.
 - Do not wrap the output in code fences.
+- Do not ignore user notes. If a user note provides specific framing, numbers, or context not in the raw evidence, incorporate it — the user is adding information they know to be true about their own experience.
 PROMPT;
     }
 

@@ -378,6 +378,9 @@ Route::get('resume-drafts/{resume_draft}/confirm', [ResumeDraftController::class
 Route::post('resume-drafts/{resume_draft}/confirm', [ResumeDraftController::class, 'confirm'])
     ->name('resume-drafts.confirm');
 
+Route::post('resume-drafts/{resume_draft}/synthesize-notes', [ResumeDraftController::class, 'synthesizeNotes'])
+    ->name('resume-drafts.synthesize-notes');
+
 // Editing: Draft review & editing.
 Route::get('resume-drafts/{resume_draft}/edit', [ResumeDraftController::class, 'edit'])
     ->name('resume-drafts.edit');
