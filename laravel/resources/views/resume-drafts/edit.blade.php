@@ -176,8 +176,9 @@
                             style="border-color: var(--color-surface-input-border); background: var(--color-surface-input);"
                         >
                             <div class="text-sm">
-                                <span class="font-medium">.{{ $artifact->file_format }}</span>
+                                <span class="font-medium">{{ $artifact->title ?? 'Untitled' }}</span>
                                 <span style="color: var(--color-text-muted);">
+                                    · .{{ $artifact->file_format }}
                                     · {{ number_format($artifact->file_size_bytes / 1024, 0) }} KB
                                     · {{ $artifact->created_at->format('M j, Y g:ia') }}
                                 </span>
@@ -195,23 +196,104 @@
 
             <form method="POST" action="{{ route('resume-drafts.generate-document', $draft) }}">
                 @csrf
-                <div class="flex items-end gap-3 flex-wrap">
+                <div class="space-y-4">
+                    <h2 class="field-label">Resume header</h2>
+
                     <div>
-                        <label for="candidate_name" class="field-label mb-1">Your name</label>
+                        <label for="candidate_name" class="field-label mb-1">Full name</label>
                         <input
                             type="text"
                             id="candidate_name"
                             name="candidate_name"
                             class="input @error('candidate_name') has-error @enderror"
                             value="{{ old('candidate_name') }}"
-                            placeholder="Full name for the resume header"
+                            placeholder="Jane Doe"
                             required
-                            style="min-width: 260px;"
                         >
                         @error('candidate_name')
                             <p class="field-error">{{ $message }}</p>
                         @enderror
                     </div>
+
+                    <div>
+                        <label for="candidate_title" class="field-label mb-1">Professional title (optional)</label>
+                        <input
+                            type="text"
+                            id="candidate_title"
+                            name="candidate_title"
+                            class="input"
+                            value="{{ old('candidate_title') }}"
+                            placeholder="Full Stack Engineer"
+                        >
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div>
+                            <label for="candidate_email" class="field-label mb-1">Email (optional)</label>
+                            <input
+                                type="email"
+                                id="candidate_email"
+                                name="candidate_email"
+                                class="input"
+                                value="{{ old('candidate_email') }}"
+                                placeholder="name@example.com"
+                            >
+                        </div>
+                        <div>
+                            <label for="candidate_phone" class="field-label mb-1">Phone (optional)</label>
+                            <input
+                                type="text"
+                                id="candidate_phone"
+                                name="candidate_phone"
+                                class="input"
+                                value="{{ old('candidate_phone') }}"
+                                placeholder="(555) 123-4567"
+                            >
+                        </div>
+                        <div>
+                            <label for="candidate_location" class="field-label mb-1">Location (optional)</label>
+                            <input
+                                type="text"
+                                id="candidate_location"
+                                name="candidate_location"
+                                class="input"
+                                value="{{ old('candidate_location') }}"
+                                placeholder="Denver, CO"
+                            >
+                        </div>
+                    </div>
+
+                    <h2 class="field-label mt-2">Document settings</h2>
+
+                    <div>
+                        <label for="document_title" class="field-label mb-1">Document title</label>
+                        <input
+                            type="text"
+                            id="document_title"
+                            name="document_title"
+                            class="input"
+                            value="{{ old('document_title') }}"
+                            placeholder="e.g., Staff Engineer Resume - Acme Corp"
+                        >
+                        <p class="text-xs mt-1" style="color: var(--color-text-muted);">
+                            Used as the display name and download filename.
+                        </p>
+                    </div>
+
+                    <div>
+                        <label for="style_guidelines" class="field-label mb-1">Style guidelines (optional)</label>
+                        <p class="text-xs mb-2" style="color: var(--color-text-muted);">
+                            Describe brand-specific formatting preferences — fonts, colors, layout style. The AI will incorporate these into the document design.
+                        </p>
+                        <textarea
+                            id="style_guidelines"
+                            name="style_guidelines"
+                            class="input text-sm"
+                            rows="3"
+                            placeholder="e.g., Use brand blue (#2E75B6), clean modern style, Calibri font"
+                        >{{ old('style_guidelines', $draft->style_guidelines) }}</textarea>
+                    </div>
+
                     <button type="submit" class="btn-primary">
                         {{ $draft->artifacts->isNotEmpty() ? 'Regenerate .docx' : 'Generate .docx' }}
                     </button>

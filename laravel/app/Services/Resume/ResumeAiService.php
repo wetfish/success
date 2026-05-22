@@ -225,14 +225,28 @@ PROMPT;
      *
      * @return array The parsed document spec.
      */
-    public function generateDocumentSpec(string $markdownContent): array
+    public function generateDocumentSpec(string $markdownContent, ?string $styleGuidelines = null): array
     {
+        $styleSection = '';
+        if ($styleGuidelines !== null && trim($styleGuidelines) !== '') {
+            $styleSection = <<<STYLE
+
+            ---
+
+            ## Style Guidelines
+
+            The candidate has provided these formatting preferences. Incorporate them into the "styling" section of the spec:
+
+            {$styleGuidelines}
+            STYLE;
+        }
+
         $userMessage = <<<MESSAGE
         Parse this resume markdown into a structured JSON document spec. Return ONLY the JSON object, no preamble, no code fences.
 
         ---
 
-        {$markdownContent}
+        {$markdownContent}{$styleSection}
         MESSAGE;
 
         $messages = [['role' => 'user', 'content' => $userMessage]];
@@ -277,11 +291,17 @@ PROMPT;
     private function documentSpecSystemPrompt(): string
     {
         return <<<'PROMPT'
-You are a resume document formatter. You will receive resume content in markdown. Parse it into a structured JSON object that a document rendering engine can consume.
+You are a resume document formatter. You will receive resume content in markdown, and optionally style guidelines from the candidate. Parse the content into a structured JSON object that a document rendering engine can consume.
 
 Return a JSON object with these keys:
 
 {
+  "styling": {
+    "font_primary": "Arial",
+    "color_heading": "333333",
+    "color_accent": "333333",
+    "color_body": "444444"
+  },
   "name": "Candidate Name",
   "summary": "The professional summary paragraph as a single string.",
   "experience": [
@@ -310,7 +330,8 @@ Return a JSON object with these keys:
 }
 
 Rules:
-- Extract the candidate name from the H1 heading. If it's a placeholder like "{{NAME}}", use it as-is.
+- **Styling**: The "styling" object controls document formatting. All color values are 6-digit hex WITHOUT the # prefix. "font_primary" is the font family name. If style guidelines are provided, translate them into these fields (e.g., "use brand blue" - appropriate hex in color_accent). If no guidelines are provided, use the defaults shown above.
+- Extract the candidate name from the H1 heading. If it's a placeholder like "{{HEADER}}", use it as-is.
 - The summary is the text under "Professional Summary" or similar heading, as a single string.
 - Each experience entry is one position. Preserve the exact title, organization, and date range from the markdown.
 - Bullets are the dash-prefixed items under each position. Preserve the exact text — do not rewrite.
@@ -364,7 +385,7 @@ The candidate has manually reviewed every piece of evidence and written their ow
 
 Produce the resume as clean markdown with the following sections in order:
 
-1. **Header** — candidate name as an H1 (use "{{NAME}}" as a placeholder — the user will fill this in). No contact info — the user adds that during formatting.
+1. **Header** — use `{{HEADER}}` as a single-line placeholder. The candidate's name and contact details are added during document formatting, not in the markdown.
 
 2. **Professional Summary** — 3-5 sentences, tightly aligned with the strategy summary provided. This is the narrative spine of the resume. Don't repeat the strategy verbatim — translate it into first-person professional prose that a hiring manager reads in 10 seconds.
 
@@ -383,10 +404,11 @@ Produce the resume as clean markdown with the following sections in order:
 ## Formatting rules
 
 - Use standard markdown: `#` for the name, `##` for section headers, `###` for position headers, `-` for bullets.
-- Position headers should follow the pattern: `### Title, Organization` with dates on the next line in italics: `*Month Year – Month Year*` (or `*Month Year – Present*`).
+- Position headers should follow the pattern: `### Title, Organization` with dates on the next line in italics: `*Month Year - Month Year*` (or `*Month Year - Present*`).
 - No bold within bullets unless genuinely needed for emphasis. Clean prose beats heavy formatting.
 - No markdown links in the experience section — URLs go in the Additional section if included at all.
 - Aim for 1-2 pages of content when rendered. Be selective rather than comprehensive — a tight resume beats a thorough one.
+- Do not use em-dash characters (—). Use regular hyphens (-), commas, semicolons, or restructure the sentence instead. Em-dashes cause encoding issues in document generation.
 
 ## What NOT to do
 

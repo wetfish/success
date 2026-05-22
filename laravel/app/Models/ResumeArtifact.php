@@ -18,6 +18,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  */
 #[Fillable([
     'resume_draft_id',
+    'title',
     'file_path',
     'file_format',
     'file_size_bytes',

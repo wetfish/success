@@ -1045,7 +1045,7 @@ class ResumeDraftController extends Controller
      */
     public function reviseSelections(ResumeDraft $resumeDraft): RedirectResponse
     {
-        if (! $resumeDraft->isEditing() && ! $resumeDraft->isApproved()) {
+        if (! $resumeDraft->isEditing() && ! $resumeDraft->isApproved() && ! $resumeDraft->isFormatted()) {
             return redirect()
                 ->route('resume-drafts.show', $resumeDraft)
                 ->with('error', 'This draft cannot be revised from its current status.');
@@ -1087,10 +1087,32 @@ class ResumeDraftController extends Controller
 
         $validated = $request->validate([
             'candidate_name' => ['required', 'string', 'max:200'],
+            'candidate_title' => ['nullable', 'string', 'max:200'],
+            'candidate_email' => ['nullable', 'string', 'max:200'],
+            'candidate_phone' => ['nullable', 'string', 'max:50'],
+            'candidate_location' => ['nullable', 'string', 'max:200'],
+            'document_title' => ['nullable', 'string', 'max:200'],
+            'style_guidelines' => ['nullable', 'string', 'max:2000'],
         ]);
 
+        // Persist style guidelines so they carry across regenerations.
+        if (array_key_exists('style_guidelines', $validated)) {
+            $resumeDraft->update(['style_guidelines' => $validated['style_guidelines']]);
+        }
+
+        $contactInfo = [
+            'name' => $validated['candidate_name'],
+            'title' => $validated['candidate_title'] ?? null,
+            'email' => $validated['candidate_email'] ?? null,
+            'phone' => $validated['candidate_phone'] ?? null,
+            'location' => $validated['candidate_location'] ?? null,
+        ];
+
         try {
-            $spec = $aiService->generateDocumentSpec($resumeDraft->user_content);
+            $spec = $aiService->generateDocumentSpec(
+                $resumeDraft->user_content,
+                $validated['style_guidelines'] ?? null,
+            );
         } catch (Throwable $e) {
             Log::error('Document spec generation failed', [
                 'resume_draft_id' => $resumeDraft->id,
@@ -1132,7 +1154,7 @@ class ResumeDraftController extends Controller
         $absolutePath = storage_path('app/' . $relativePath);
 
         try {
-            $fileSize = $renderer->render($spec, $absolutePath, $validated['candidate_name']);
+            $fileSize = $renderer->render($spec, $absolutePath, $contactInfo);
         } catch (Throwable $e) {
             Log::error('Document rendering failed', [
                 'resume_draft_id' => $resumeDraft->id,
@@ -1146,6 +1168,7 @@ class ResumeDraftController extends Controller
 
         $artifact = ResumeArtifact::create([
             'resume_draft_id' => $resumeDraft->id,
+            'title' => $validated['document_title'] ?? null,
             'file_path' => $relativePath,
             'file_format' => 'docx',
             'file_size_bytes' => $fileSize,
@@ -1180,8 +1203,9 @@ class ResumeDraftController extends Controller
         }
 
         $resumeDraft->load('jobListing');
-        $downloadName = str_replace(' ', '_', $resumeDraft->jobListing->role_title)
-            . '_resume.' . $artifact->file_format;
+        $baseName = $artifact->title
+            ?? $resumeDraft->jobListing->role_title . ' Resume';
+        $downloadName = str_replace(' ', '_', $baseName) . '.' . $artifact->file_format;
 
         return response()->download($absolutePath, $downloadName);
     }
