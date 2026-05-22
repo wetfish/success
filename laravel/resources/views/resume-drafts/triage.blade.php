@@ -294,5 +294,13 @@
                 </div>
             </div>
         @endif
+
+        @if (! $draft->isSelecting())
+            <div class="mt-10 pt-6" style="border-top: 1px solid var(--color-surface-input-border);">
+                <a href="{{ route('resume-drafts.edit', $draft) }}" class="link-subtle text-sm">
+                    ← Back to draft
+                </a>
+            </div>
+        @endif
     </div>
 @endsection

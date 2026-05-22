@@ -24,36 +24,46 @@
         </p>
     </div>
 
-    {{-- Strategy summary — editable with synthesis --}}
+    {{-- Strategy summary --}}
     <section class="mb-10" data-confirm-strategy>
         <h2 class="metadata-label mb-2">Strategy</h2>
-        <p class="text-xs mb-3" style="color: var(--color-text-muted);">
-            This guides the overall framing of your resume. Update it to reflect what you discovered during review.
-        </p>
 
-        <textarea
-            class="input text-sm leading-relaxed"
-            rows="4"
-            data-strategy-textarea
-        >{{ $draft->strategy_summary }}</textarea>
+        @if ($draft->isSelecting())
+            <p class="text-xs mb-3" style="color: var(--color-text-muted);">
+                This guides the overall framing of your resume. Update it to reflect what you discovered during review.
+            </p>
 
-        <div class="flex items-center gap-3 mt-2 flex-wrap">
-            <button type="button" class="btn-secondary text-sm" data-strategy-save>
-                Save strategy
-            </button>
-            <button type="button" class="btn-secondary text-sm" data-strategy-synthesize>
-                Synthesize from notes
-            </button>
-            <button type="button" class="link-subtle text-xs" data-strategy-revert>
-                Revert to original
-            </button>
-            <span
-                class="text-xs"
-                style="color: var(--color-text-muted);"
-                data-strategy-status
-                hidden
-            ></span>
-        </div>
+            <textarea
+                class="input text-sm leading-relaxed"
+                rows="4"
+                data-strategy-textarea
+            >{{ $draft->strategy_summary }}</textarea>
+
+            <div class="flex items-center gap-3 mt-2 flex-wrap">
+                <button type="button" class="btn-secondary text-sm" data-strategy-save>
+                    Save strategy
+                </button>
+                <button type="button" class="btn-secondary text-sm" data-strategy-synthesize>
+                    Synthesize from notes
+                </button>
+                <button type="button" class="link-subtle text-xs" data-strategy-revert>
+                    Revert to original
+                </button>
+                <span
+                    class="text-xs"
+                    style="color: var(--color-text-muted);"
+                    data-strategy-status
+                    hidden
+                ></span>
+            </div>
+        @else
+            <div
+                class="rounded-lg border p-4 text-sm leading-relaxed"
+                style="border-color: var(--color-surface-input-border); background: var(--color-surface-input);"
+            >
+                {{ $draft->strategy_summary }}
+            </div>
+        @endif
     </section>
 
     {{-- Accepted requirements with selections and notes --}}
@@ -162,8 +172,8 @@
         @endif
     </section>
 
-    {{-- Confirm button --}}
-    @if ($acceptedRequirements->isNotEmpty())
+    {{-- Confirm button (selecting only) or back link (other statuses) --}}
+    @if ($draft->isSelecting() && $acceptedRequirements->isNotEmpty())
         <div class="mt-10 pt-6 flex items-center justify-between" style="border-top: 1px solid var(--color-surface-input-border);">
             <p class="text-sm" style="color: var(--color-text-muted);">
                 @php
@@ -179,6 +189,12 @@
                     Generate resume draft →
                 </button>
             </form>
+        </div>
+    @elseif (! $draft->isSelecting())
+        <div class="mt-10 pt-6" style="border-top: 1px solid var(--color-surface-input-border);">
+            <a href="{{ route('resume-drafts.edit', $draft) }}" class="link-subtle text-sm">
+                ← Back to draft
+            </a>
         </div>
     @endif
 

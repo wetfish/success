@@ -188,9 +188,14 @@ class ResumeDraftController extends Controller
      *   approved   → markdown editor (read-only)
      *   formatted  → job listing page (future — artifact download)
      */
-    public function show(ResumeDraft $resumeDraft): View|RedirectResponse
+    public function show(ResumeDraft $resumeDraft, Request $request): View|RedirectResponse
     {
-        if ($resumeDraft->isEditing() || $resumeDraft->isApproved() || $resumeDraft->isFormatted()) {
+        // Allow viewing triage read-only from explicit navigation links
+        // (e.g., "View requirements triage" on the edit page). Without
+        // the parameter, post-selecting statuses redirect to the edit page.
+        $forceView = $request->query('view') === 'triage';
+
+        if (! $forceView && ($resumeDraft->isEditing() || $resumeDraft->isApproved() || $resumeDraft->isFormatted())) {
             return redirect()->route('resume-drafts.edit', $resumeDraft);
         }
 
@@ -453,10 +458,6 @@ class ResumeDraftController extends Controller
         ResumeDraft $resumeDraft,
         JobListingRequirement $requirement,
     ): View|RedirectResponse {
-        if (! $resumeDraft->isSelecting()) {
-            return redirect()->route('resume-drafts.show', $resumeDraft);
-        }
-
         // Verify the requirement belongs to this draft's listing.
         if ($requirement->job_listing_id !== $resumeDraft->job_listing_id) {
             abort(404);
@@ -685,10 +686,6 @@ class ResumeDraftController extends Controller
      */
     public function confirmPage(ResumeDraft $resumeDraft): View|RedirectResponse
     {
-        if (! $resumeDraft->isSelecting()) {
-            return redirect()->route('resume-drafts.show', $resumeDraft);
-        }
-
         $resumeDraft->load(['jobListing.organization', 'jobListing.requirements']);
         $jobListing = $resumeDraft->jobListing;
         $decisions = $resumeDraft->requirement_decisions ?? [];
@@ -1051,15 +1048,15 @@ class ResumeDraftController extends Controller
                 ->with('error', 'This draft cannot be revised from its current status.');
         }
 
-        $resumeDraft->update([
-            'generated_content' => null,
-            'user_content' => null,
-            'status' => 'selecting',
-        ]);
+        // Only reset the status — never wipe content. The generated
+        // content cost real money and the user's edits are irreplaceable.
+        // When they confirm and regenerate, the new content overwrites
+        // naturally. Until then, the prior draft is preserved.
+        $resumeDraft->update(['status' => 'selecting']);
 
         return redirect()
             ->route('resume-drafts.show', $resumeDraft)
-            ->with('status', 'Draft discarded — revise your selections and generate again.');
+            ->with('status', 'Returned to selection wizard — your previous draft is preserved until you regenerate.');
     }
 
     // -----------------------------------------------------------------

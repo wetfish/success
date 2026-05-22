@@ -302,8 +302,14 @@
         </div>
     @endif
 
-    {{-- Revise selections — available in both editing and approved states --}}
-    <div class="mt-6">
+    {{-- Navigation & revise — available in post-selecting states --}}
+    <div class="mt-6 flex items-center gap-4 flex-wrap">
+        <a href="{{ route('resume-drafts.confirm-page', $draft) }}" class="link-subtle text-sm">
+            View review summary
+        </a>
+        <a href="{{ route('resume-drafts.show', $draft) }}?view=triage" class="link-subtle text-sm">
+            View requirements triage
+        </a>
         <button
             type="button"
             class="link-subtle text-sm"
@@ -319,13 +325,13 @@
         <div class="modal-panel">
             <h3 class="modal-title">Revise selections?</h3>
             <p class="modal-message">
-                This will discard the generated draft and return you to the selection wizard. Your requirement decisions, catalog selections, and relevance notes are preserved — you can adjust them and regenerate.
+                This will return you to the selection wizard where you can adjust your strategy, requirement decisions, and notes. Your current draft is preserved until you regenerate.
             </p>
             <div class="modal-actions">
                 <button type="button" class="btn-secondary" data-revise-cancel>Cancel</button>
                 <form method="POST" action="{{ route('resume-drafts.revise-selections', $draft) }}">
                     @csrf
-                    <button type="submit" class="btn-destructive">Discard draft & revise</button>
+                    <button type="submit" class="btn-primary">Revise selections</button>
                 </form>
             </div>
         </div>
