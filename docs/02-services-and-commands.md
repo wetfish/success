@@ -157,6 +157,33 @@ Step 4 is what makes the merge stick across the rest of the queue. Without it, a
 
 A `RuntimeException` subclass thrown when a merge can't complete. Same exception-as-flash-message pattern as `DraftConfirmationException` — write the message for the user, the controller surfaces it and stays on the merge page.
 
+## Resume generation pipeline
+
+Services for building tailored resumes against job listings. Separate from the extraction pipeline — different task, different prompts, different response formats — but shares the same API key and model config.
+
+### `App\Services\Resume\ResumeAiService`
+
+Handles all AI calls for the resume generation flow. Bound via `ExtractionServiceProvider` using the same API credentials as the extraction provider. Three operations:
+
+- `analyzeRelevance(catalogSummary, jobListingBody, roleTitle)` — extracts requirements from a listing, produces a strategy summary, and maps catalog entries to requirements. Returns a `RelevanceResult`. Called once when a draft is first created.
+- `generateDraft(promptContext)` — produces a markdown resume from the user's confirmed selections. The prompt text is built externally by `DraftPromptBuilder`; this method handles the API call. Returns a `DraftResult`. The system prompt explicitly prioritizes user relevance notes over AI reasoning.
+- `synthesizeNotesIntoStrategy(currentStrategy, notesContext, roleTitle)` — refines the strategy summary by incorporating the user's relevance notes from the review process. Returns a `SynthesisResult`. Called from the confirm page when the user clicks "Synthesize from notes."
+
+### `App\Services\Resume\DraftPromptBuilder`
+
+Serializes a confirmed `ResumeDraft` into structured text for the generation prompt. Pure read service — loads all relationships, groups by requirement (not by position hierarchy), folds duplicate requirements into their primary's section, and formats each selectable type with its evidence details, AI reasoning, and user notes.
+
+### `App\Services\Resume\CatalogSummarizer`
+
+Serializes the user's entire career catalog into structured text for the initial relevance analysis prompt. Groups data by position (the natural resume structure): positions contain projects, projects contain accomplishments. Career themes, tags, and portfolio links are separate sections. Each entity includes its database ID so the AI can reference specific records.
+
+### Value objects
+
+- `RelevanceResult` — requirements, strategy summary, selections, and token usage from `analyzeRelevance`.
+- `DraftResult` — markdown prose and token usage from `generateDraft`.
+
+Both carry `inputTokens`, `outputTokens`, `costCents`, and `model` for usage tracking.
+
 ## Defense-in-depth on AI inputs
 
 A pattern that emerged during milestone 4: the AI is non-deterministic, so the service layer can't assume the payload shape is perfectly consistent. We use two coordinated mitigations on every AI-produced field:

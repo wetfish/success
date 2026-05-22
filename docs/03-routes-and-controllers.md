@@ -209,7 +209,7 @@ People are managers, collaborators, mentors, and other individuals the user has 
 
 ## Resume generation wizard
 
-`ResumeDraftController` orchestrates a three-screen wizard for building a resume against a job listing. All screens operate within the `selecting` status; the draft advances to `drafting` on final confirmation. Not a standard resource — the flow is entry-point → multi-page review → confirm.
+`ResumeDraftController` orchestrates a multi-screen wizard for building a resume against a job listing, followed by draft generation and an editing phase. The wizard screens operate within the `selecting` status; the confirm action triggers AI generation and advances through `drafting` → `editing` → `approved`. Not a standard resource — the flow is entry-point → multi-page review → confirm → generate → edit → approve.
 
 **Entry point.** `POST /job-listings/{listing}/resume-drafts` runs AI analysis (extracts requirements, maps catalog entries, generates strategy summary), persists everything in a transaction, and redirects to Screen 1. If a draft in `selecting` status already exists for the listing, the user is redirected to it instead of creating a duplicate.
 
@@ -250,8 +250,27 @@ Navigation: Previous/Next between accepted requirements, with the last "Next" li
 |---|---|---|
 | `resume-drafts/{draft}/confirm` | GET | `resume-drafts.confirm-page` |
 | `resume-drafts/{draft}/confirm` | POST | `resume-drafts.confirm` |
+| `resume-drafts/{draft}/synthesize-notes` | POST | `resume-drafts.synthesize-notes` |
 
-Read-only summary: strategy, accepted requirements with included selection counts and freeform response counts, duplicate grouping ("Also addresses: [titles]"), and edit links back to each requirement's Screen 2 page. The confirm POST validates at least one accepted requirement with at least one included selection, then advances the draft to `drafting` status.
+The confirm page shows the editable strategy summary, accepted requirements with their included selections and user relevance notes, duplicate groupings, and edit links. The strategy editor on this page supports "Synthesize from notes" — an AJAX call that collects all user notes from the review process and sends them to the AI to produce an updated strategy. Manual save and revert to original are also available.
+
+The confirm POST validates at least one accepted requirement with at least one included selection, then triggers AI draft generation synchronously. On success, the markdown is stored in both `generated_content` (immutable) and `user_content` (editable), status advances to `editing`, and the user is redirected to the editing page. On failure, status rolls back to `selecting` and the user is redirected to the confirm page with an error.
+
+### Editing phase
+
+| Route | Method | Name |
+|---|---|---|
+| `resume-drafts/{draft}/edit` | GET | `resume-drafts.edit` |
+| `resume-drafts/{draft}/content` | POST | `resume-drafts.update-content` |
+| `resume-drafts/{draft}/revert` | POST | `resume-drafts.revert` |
+| `resume-drafts/{draft}/approve` | POST | `resume-drafts.approve` |
+| `resume-drafts/{draft}/revise` | POST | `resume-drafts.revise-selections` |
+
+The editing page shows a monospace textarea with `user_content` for the user to review and edit the AI-generated resume markdown. Save, revert to AI original, and approve actions are available. Both revert and approve use confirmation modals. Approved drafts render read-only with a note that document formatting is coming in 5.4.
+
+"Revise selections and regenerate" discards the generated content (clears both `generated_content` and `user_content`), resets status to `selecting`, and redirects to the triage page. Requirement decisions, selections, and user notes are preserved — only the generated prose is discarded.
+
+The `show` route acts as a status router: `selecting` renders triage, `editing`/`approved` redirects to the edit page, and `drafting` with no content resets to `selecting` (recovering from stale state left by failed generation or the 5.2 placeholder).
 
 ## Destroy redirects
 

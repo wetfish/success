@@ -8,6 +8,7 @@ use App\Models\SourceDocument;
 use App\Services\Extraction\ExtractionResult;
 use App\Services\Extraction\SummaryResult;
 use App\Services\Extraction\SynthesisResult;
+use App\Services\Resume\DraftResult;
 use App\Services\Resume\RelevanceResult;
 
 /**
@@ -100,6 +101,23 @@ class AiUsageTracker
             'model' => $result->model,
             'operation' => $operation,
             'resume_draft_id' => $resumeDraft?->id,
+            'input_tokens' => $result->inputTokens,
+            'output_tokens' => $result->outputTokens,
+            'cost_cents' => $result->costCents,
+            'success' => true,
+        ]);
+    }
+
+    public function recordDraftGeneration(
+        DraftResult $result,
+        string $provider,
+        ResumeDraft $resumeDraft,
+    ): AiUsageEvent {
+        return AiUsageEvent::create([
+            'provider' => $provider,
+            'model' => $result->model,
+            'operation' => 'generate_draft',
+            'resume_draft_id' => $resumeDraft->id,
             'input_tokens' => $result->inputTokens,
             'output_tokens' => $result->outputTokens,
             'cost_cents' => $result->costCents,

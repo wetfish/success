@@ -28,6 +28,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
     'requirement_decisions',
     'generated_content',
     'user_content',
+    'style_guidelines',
     'format_preference',
     'status',
 ])]

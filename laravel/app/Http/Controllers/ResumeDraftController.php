@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\JobListing;
 use App\Models\JobListingRequirement;
+use App\Models\ResumeArtifact;
 use App\Models\ResumeDraft;
 use App\Models\ResumeSelection;
 use App\Models\SourceDocument;
@@ -11,28 +12,33 @@ use App\Services\AiUsageTracker;
 use App\Services\Extraction\ExtractionException;
 use App\Services\Extraction\ExtractionProvider;
 use App\Services\Resume\CatalogSummarizer;
+use App\Services\Resume\DraftPromptBuilder;
 use App\Services\Resume\ResumeAiService;
+use App\Services\Resume\ResumeDocumentRenderer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\View\View;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Throwable;
 
 /**
  * Orchestrates the resume generation wizard. The flow is a
- * three-screen wizard, all within the `selecting` status:
+ * three-screen wizard within the `selecting` status, followed
+ * by draft generation and an editing phase:
  *
  *   Screen 1  — Strategy & requirements triage (show)
  *   Screen 2  — Per-requirement selection review (showRequirement)
  *   Screen 3  — Confirm & generate (confirmPage / confirm)
+ *   Editing   — Draft review & editing (edit / updateContent / revert / approve / reviseSelections)
  *
  * Routes:
  *   create            — POST: run AI analysis, persist requirements +
  *                       strategy + selections, redirect to Screen 1
- *   show              — GET: Screen 1 — strategy editor + requirement
- *                       triage with accept/reject and match counts
+ *   show              — GET: status router — triage for `selecting`,
+ *                       redirect to edit for `editing`/`approved`
  *   decideRequirement — POST/AJAX: accept or reject a requirement
  *   showRequirement   — GET: Screen 2 — one requirement per page with
  *                       selection cards, catalog search, freeform text
@@ -42,7 +48,12 @@ use Throwable;
  *   updateStrategy    — POST/AJAX: save edited strategy summary
  *   updateNote        — POST/AJAX: save a selection's user_relevance_note
  *   confirmPage       — GET: Screen 3 — summary of all decisions
- *   confirm           — POST: lock in selections, advance to `drafting`
+ *   confirm           — POST: trigger generation, advance to `editing`
+ *   edit              — GET: markdown editor for `user_content`
+ *   updateContent     — POST: save edited `user_content`
+ *   revert            — POST: reset `user_content` to `generated_content`
+ *   approve           — POST: advance status to `approved`
+ *   reviseSelections  — POST: discard draft, reset to `selecting`
  */
 class ResumeDraftController extends Controller
 {
@@ -167,14 +178,38 @@ class ResumeDraftController extends Controller
     }
 
     /**
-     * Screen 1: Strategy & requirements triage. Shows the editable
-     * strategy summary and a list of requirements grouped by section,
-     * each with a match count and accept/reject buttons. No selection
-     * cards here — just the requirement and how many catalog entries
-     * the AI mapped to it.
+     * Status-aware entry point. Routes to the appropriate view
+     * based on where the draft is in the wizard flow:
+     *
+     *   selecting  → triage page (Screen 1)
+     *   drafting   → reset to selecting if no content (stale state),
+     *                otherwise job listing page (generation in progress)
+     *   editing    → markdown editor
+     *   approved   → markdown editor (read-only)
+     *   formatted  → job listing page (future — artifact download)
      */
-    public function show(ResumeDraft $resumeDraft): View
+    public function show(ResumeDraft $resumeDraft, Request $request): View|RedirectResponse
     {
+        // Allow viewing triage read-only from explicit navigation links
+        // (e.g., "View requirements triage" on the edit page). Without
+        // the parameter, post-selecting statuses redirect to the edit page.
+        $forceView = $request->query('view') === 'triage';
+
+        if (! $forceView && ($resumeDraft->isEditing() || $resumeDraft->isApproved() || $resumeDraft->isFormatted())) {
+            return redirect()->route('resume-drafts.edit', $resumeDraft);
+        }
+
+        // A draft stuck in `drafting` with no content means generation
+        // never completed (5.2 placeholder, or a failure without clean
+        // rollback). Reset to `selecting` so the user can retry.
+        if ($resumeDraft->isDrafting() && $resumeDraft->generated_content === null) {
+            $resumeDraft->update(['status' => 'selecting']);
+        }
+
+        if (! $resumeDraft->isSelecting()) {
+            return redirect()->route('job-listings.show', $resumeDraft->job_listing_id);
+        }
+
         $resumeDraft->load([
             'jobListing.organization',
             'jobListing.requirements',
@@ -423,10 +458,6 @@ class ResumeDraftController extends Controller
         ResumeDraft $resumeDraft,
         JobListingRequirement $requirement,
     ): View|RedirectResponse {
-        if (! $resumeDraft->isSelecting()) {
-            return redirect()->route('resume-drafts.show', $resumeDraft);
-        }
-
         // Verify the requirement belongs to this draft's listing.
         if ($requirement->job_listing_id !== $resumeDraft->job_listing_id) {
             abort(404);
@@ -646,16 +677,15 @@ class ResumeDraftController extends Controller
     // -----------------------------------------------------------------
 
     /**
-     * Screen 3: Confirmation summary. Shows a compact overview of
-     * all accepted requirements, their included selection counts,
-     * and the strategy summary (read-only at this point).
+     * Screen 3: Confirmation summary. Shows accepted requirements
+     * with their included selections and user notes, the strategy
+     * summary (editable via synthesis), and duplicate groupings.
+     * This is the user's last chance to review everything before
+     * generation — the notes they wrote during review are visible
+     * here so they can verify the AI will receive the right context.
      */
     public function confirmPage(ResumeDraft $resumeDraft): View|RedirectResponse
     {
-        if (! $resumeDraft->isSelecting()) {
-            return redirect()->route('resume-drafts.show', $resumeDraft);
-        }
-
         $resumeDraft->load(['jobListing.organization', 'jobListing.requirements']);
         $jobListing = $resumeDraft->jobListing;
         $decisions = $resumeDraft->requirement_decisions ?? [];
@@ -666,14 +696,48 @@ class ResumeDraftController extends Controller
             ->filter(fn ($r) => ($decisions[$r->id] ?? null) === 'accepted')
             ->values();
 
-        // Count included selections per accepted requirement.
-        $includedCounts = $resumeDraft->selections()
-            ->where('selected', true)
-            ->whereIn('job_listing_requirement_id', $acceptedRequirements->pluck('id'))
-            ->selectRaw('job_listing_requirement_id, count(*) as total')
-            ->groupBy('job_listing_requirement_id')
-            ->pluck('total', 'job_listing_requirement_id')
+        // Build duplicate map: primary ID → array of duplicate titles.
+        $duplicatesMap = [];
+        foreach ($decisions as $reqId => $decision) {
+            if (is_array($decision) && isset($decision['duplicate_of'])) {
+                $primaryId = $decision['duplicate_of'];
+                $dupReq = $jobListing->requirements->firstWhere('id', $reqId);
+                if ($dupReq) {
+                    $duplicatesMap[$primaryId][] = $dupReq->title;
+                }
+            }
+        }
+
+        // Collect all active requirement IDs (accepted + duplicates)
+        // so we load selections from both.
+        $activeIds = collect($decisions)
+            ->filter(fn ($d) => $d === 'accepted' || (is_array($d) && isset($d['duplicate_of'])))
+            ->keys()
             ->all();
+
+        // Load included selections with their selectables, grouped by requirement.
+        $selections = $resumeDraft->selections()
+            ->where('selected', true)
+            ->whereIn('job_listing_requirement_id', $activeIds)
+            ->with('selectable')
+            ->orderBy('display_order')
+            ->get()
+            ->groupBy('job_listing_requirement_id');
+
+        // Count included selections per accepted requirement (including
+        // selections from duplicate requirements that inherit to the primary).
+        $includedCounts = [];
+        foreach ($acceptedRequirements as $req) {
+            $count = ($selections->get($req->id)?->count() ?? 0);
+            // Add counts from duplicates that point to this primary.
+            $dupIds = collect($decisions)
+                ->filter(fn ($d) => is_array($d) && ($d['duplicate_of'] ?? null) === $req->id)
+                ->keys();
+            foreach ($dupIds as $dupId) {
+                $count += ($selections->get($dupId)?->count() ?? 0);
+            }
+            $includedCounts[$req->id] = $count;
+        }
 
         // Count source documents created during per-requirement review.
         $experienceCounts = SourceDocument::where('origin', 'requirement_response')
@@ -687,18 +751,113 @@ class ResumeDraftController extends Controller
             'draft' => $resumeDraft,
             'jobListing' => $jobListing,
             'acceptedRequirements' => $acceptedRequirements,
+            'selections' => $selections,
             'includedCounts' => $includedCounts,
             'experienceCounts' => $experienceCounts,
+            'duplicatesMap' => $duplicatesMap,
         ]);
     }
 
     /**
-     * Confirm selections and advance the draft to `drafting` status.
-     * This locks in the user's choices — strategy, requirement
-     * decisions, selections, and relevance notes all become read-only.
+     * AJAX: synthesize all user relevance notes into an updated
+     * strategy summary. Collects every user_relevance_note from
+     * included selections, groups them by requirement title, and
+     * sends them to the AI along with the current strategy to
+     * produce a refined version.
      */
-    public function confirm(ResumeDraft $resumeDraft): RedirectResponse
-    {
+    public function synthesizeNotes(
+        ResumeDraft $resumeDraft,
+        ResumeAiService $aiService,
+        AiUsageTracker $tracker,
+    ): JsonResponse {
+        if (! $resumeDraft->isSelecting()) {
+            return response()->json(['error' => 'Strategy is locked — this draft has already been confirmed.'], 422);
+        }
+
+        $resumeDraft->load(['jobListing.requirements']);
+        $decisions = $resumeDraft->requirement_decisions ?? [];
+
+        // Collect active requirement IDs (accepted + duplicates).
+        $activeIds = collect($decisions)
+            ->filter(fn ($d) => $d === 'accepted' || (is_array($d) && isset($d['duplicate_of'])))
+            ->keys()
+            ->all();
+
+        // Load included selections that have user notes.
+        $selections = $resumeDraft->selections()
+            ->where('selected', true)
+            ->whereIn('job_listing_requirement_id', $activeIds)
+            ->whereNotNull('user_relevance_note')
+            ->where('user_relevance_note', '!=', '')
+            ->with('requirement')
+            ->orderBy('job_listing_requirement_id')
+            ->orderBy('display_order')
+            ->get();
+
+        if ($selections->isEmpty()) {
+            return response()->json([
+                'error' => 'No user notes found. Add relevance notes during per-requirement review first.',
+            ], 422);
+        }
+
+        // Build structured notes context grouped by requirement.
+        $notesByReq = $selections->groupBy(fn ($s) => $s->requirement?->title ?? 'General');
+        $notesText = $notesByReq->map(function ($group, $reqTitle) {
+            $notes = $group->pluck('user_relevance_note')->implode("\n- ");
+
+            return "### {$reqTitle}\n- {$notes}";
+        })->implode("\n\n");
+
+        try {
+            $result = $aiService->synthesizeNotesIntoStrategy(
+                $resumeDraft->strategy_summary,
+                $notesText,
+                $resumeDraft->jobListing->role_title,
+            );
+        } catch (\Throwable $e) {
+            Log::error('Strategy note synthesis failed', [
+                'resume_draft_id' => $resumeDraft->id,
+                'exception' => $e->getMessage(),
+            ]);
+
+            $tracker->recordFailure(
+                provider: 'claude',
+                model: config('services.extraction.model', 'claude-sonnet-4-6'),
+                operation: 'synthesize_notes',
+                errorMessage: $e->getMessage(),
+                resumeDraft: $resumeDraft,
+            );
+
+            return response()->json([
+                'error' => 'Synthesis failed — try again, or edit the strategy manually.',
+            ], 502);
+        }
+
+        $tracker->recordSynthesis($result, 'claude');
+
+        // Save the synthesized strategy.
+        $resumeDraft->update(['strategy_summary' => $result->description]);
+
+        return response()->json([
+            'ok' => true,
+            'synthesized' => $result->description,
+        ]);
+    }
+
+    /**
+     * Confirm selections, trigger AI draft generation, and advance
+     * to `editing`. Validates the user's choices, builds the prompt
+     * from confirmed selections, calls the AI, and stores the result
+     * in both `generated_content` (immutable) and `user_content`
+     * (editable). On generation failure, rolls back to `selecting`
+     * so the user can retry.
+     */
+    public function confirm(
+        ResumeDraft $resumeDraft,
+        DraftPromptBuilder $promptBuilder,
+        ResumeAiService $aiService,
+        AiUsageTracker $tracker,
+    ): RedirectResponse {
         if (! $resumeDraft->isSelecting()) {
             return redirect()
                 ->route('resume-drafts.show', $resumeDraft)
@@ -737,14 +896,315 @@ class ResumeDraftController extends Controller
                 ->with('error', 'Include at least one catalog entry across your accepted requirements before confirming.');
         }
 
+        // Mark as drafting before the AI call so the UI shows the
+        // correct state if the user navigates away mid-generation.
         $resumeDraft->update(['status' => 'drafting']);
 
-        // TODO (5.3): Trigger draft generation here. For now, redirect
-        // back with a status message indicating the selections are
-        // locked in and draft generation is the next milestone.
+        $promptContext = $promptBuilder->build($resumeDraft);
+
+        try {
+            $result = $aiService->generateDraft($promptContext);
+        } catch (Throwable $e) {
+            Log::error('Resume draft generation failed', [
+                'resume_draft_id' => $resumeDraft->id,
+                'exception' => $e->getMessage(),
+            ]);
+
+            $tracker->recordFailure(
+                provider: 'claude',
+                model: config('services.extraction.model', 'claude-sonnet-4-6'),
+                operation: 'generate_draft',
+                errorMessage: $e->getMessage(),
+                resumeDraft: $resumeDraft,
+            );
+
+            // Roll back to selecting so the user can retry.
+            $resumeDraft->update(['status' => 'selecting']);
+
+            return redirect()
+                ->route('resume-drafts.confirm-page', $resumeDraft)
+                ->with('error', 'Draft generation failed — please try again. If the problem persists, the document may be too large for synchronous processing.');
+        }
+
+        $resumeDraft->update([
+            'generated_content' => $result->markdown,
+            'user_content' => $result->markdown,
+            'status' => 'editing',
+        ]);
+
+        $tracker->recordDraftGeneration(
+            result: $result,
+            provider: 'claude',
+            resumeDraft: $resumeDraft,
+        );
+
+        return redirect()->route('resume-drafts.edit', $resumeDraft);
+    }
+
+    // -----------------------------------------------------------------
+    // Editing phase
+    // -----------------------------------------------------------------
+
+    /**
+     * Draft editing page. Shows a textarea with `user_content` for
+     * the user to review and edit the AI-generated resume. Available
+     * in both `editing` and `approved` status — approved drafts
+     * render as read-only with a path to formatting (5.4).
+     */
+    public function edit(ResumeDraft $resumeDraft): View|RedirectResponse
+    {
+        if ($resumeDraft->isSelecting()) {
+            return redirect()->route('resume-drafts.show', $resumeDraft);
+        }
+
+        if ($resumeDraft->isDrafting()) {
+            return redirect()
+                ->route('job-listings.show', $resumeDraft->job_listing_id)
+                ->with('status', 'Draft generation is still in progress.');
+        }
+
+        $resumeDraft->load(['jobListing.organization', 'artifacts' => fn ($q) => $q->orderByDesc('created_at')]);
+
+        return view('resume-drafts.edit', [
+            'draft' => $resumeDraft,
+            'jobListing' => $resumeDraft->jobListing,
+        ]);
+    }
+
+    /**
+     * Save the user's edits to the draft content.
+     */
+    public function updateContent(ResumeDraft $resumeDraft, Request $request): RedirectResponse
+    {
+        if (! $resumeDraft->isEditing()) {
+            return redirect()
+                ->route('resume-drafts.edit', $resumeDraft)
+                ->with('error', 'This draft is not currently editable.');
+        }
+
+        $validated = $request->validate([
+            'user_content' => ['required', 'string', 'max:50000'],
+        ]);
+
+        $resumeDraft->update(['user_content' => $validated['user_content']]);
+
         return redirect()
-            ->route('job-listings.show', $resumeDraft->job_listing_id)
-            ->with('status', 'Selections confirmed — draft generation is coming in the next milestone.');
+            ->route('resume-drafts.edit', $resumeDraft)
+            ->with('status', 'Draft saved.');
+    }
+
+    /**
+     * Revert the user's edits back to the original AI-generated
+     * content. Copies `generated_content` into `user_content`.
+     */
+    public function revert(ResumeDraft $resumeDraft): RedirectResponse
+    {
+        if (! $resumeDraft->isEditing()) {
+            return redirect()
+                ->route('resume-drafts.edit', $resumeDraft)
+                ->with('error', 'This draft is not currently editable.');
+        }
+
+        $resumeDraft->update([
+            'user_content' => $resumeDraft->generated_content,
+        ]);
+
+        return redirect()
+            ->route('resume-drafts.edit', $resumeDraft)
+            ->with('status', 'Draft reverted to the AI-generated version.');
+    }
+
+    /**
+     * Approve the draft, marking it ready for formatted document
+     * generation (5.4). The user can still view the content but
+     * can no longer edit it.
+     */
+    public function approve(ResumeDraft $resumeDraft): RedirectResponse
+    {
+        if (! $resumeDraft->isEditing()) {
+            return redirect()
+                ->route('resume-drafts.edit', $resumeDraft)
+                ->with('error', 'Only drafts in editing status can be approved.');
+        }
+
+        $resumeDraft->update(['status' => 'approved']);
+
+        return redirect()
+            ->route('resume-drafts.edit', $resumeDraft)
+            ->with('status', 'Draft approved — ready for document formatting.');
+    }
+
+    /**
+     * Discard the generated draft and return to the selection wizard.
+     * Clears both content columns and resets status to `selecting`
+     * so the user can revise their strategy, requirement decisions,
+     * and selection notes before regenerating.
+     */
+    public function reviseSelections(ResumeDraft $resumeDraft): RedirectResponse
+    {
+        if (! $resumeDraft->isEditing() && ! $resumeDraft->isApproved() && ! $resumeDraft->isFormatted()) {
+            return redirect()
+                ->route('resume-drafts.show', $resumeDraft)
+                ->with('error', 'This draft cannot be revised from its current status.');
+        }
+
+        // Only reset the status — never wipe content. The generated
+        // content cost real money and the user's edits are irreplaceable.
+        // When they confirm and regenerate, the new content overwrites
+        // naturally. Until then, the prior draft is preserved.
+        $resumeDraft->update(['status' => 'selecting']);
+
+        return redirect()
+            ->route('resume-drafts.show', $resumeDraft)
+            ->with('status', 'Returned to selection wizard — your previous draft is preserved until you regenerate.');
+    }
+
+    // -----------------------------------------------------------------
+    // Document generation
+    // -----------------------------------------------------------------
+
+    /**
+     * Generate a formatted .docx document from the approved draft.
+     * Calls the AI to parse the markdown into a structured spec,
+     * then renders it through PhpWord. Stores the result as a
+     * ResumeArtifact and advances status to `formatted`.
+     */
+    public function generateDocument(
+        ResumeDraft $resumeDraft,
+        Request $request,
+        ResumeAiService $aiService,
+        ResumeDocumentRenderer $renderer,
+        AiUsageTracker $tracker,
+    ): RedirectResponse {
+        if (! $resumeDraft->isApproved() && ! $resumeDraft->isFormatted()) {
+            return redirect()
+                ->route('resume-drafts.edit', $resumeDraft)
+                ->with('error', 'Approve the draft before generating a document.');
+        }
+
+        $validated = $request->validate([
+            'candidate_name' => ['required', 'string', 'max:200'],
+            'candidate_title' => ['nullable', 'string', 'max:200'],
+            'candidate_email' => ['nullable', 'string', 'max:200'],
+            'candidate_phone' => ['nullable', 'string', 'max:50'],
+            'candidate_location' => ['nullable', 'string', 'max:200'],
+            'document_title' => ['nullable', 'string', 'max:200'],
+            'style_guidelines' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        // Persist style guidelines so they carry across regenerations.
+        if (array_key_exists('style_guidelines', $validated)) {
+            $resumeDraft->update(['style_guidelines' => $validated['style_guidelines']]);
+        }
+
+        $contactInfo = [
+            'name' => $validated['candidate_name'],
+            'title' => $validated['candidate_title'] ?? null,
+            'email' => $validated['candidate_email'] ?? null,
+            'phone' => $validated['candidate_phone'] ?? null,
+            'location' => $validated['candidate_location'] ?? null,
+        ];
+
+        try {
+            $spec = $aiService->generateDocumentSpec(
+                $resumeDraft->user_content,
+                $validated['style_guidelines'] ?? null,
+            );
+        } catch (Throwable $e) {
+            Log::error('Document spec generation failed', [
+                'resume_draft_id' => $resumeDraft->id,
+                'exception' => $e->getMessage(),
+            ]);
+
+            $tracker->recordFailure(
+                provider: 'claude',
+                model: config('services.extraction.model', 'claude-sonnet-4-6'),
+                operation: 'generate_document_spec',
+                errorMessage: $e->getMessage(),
+                resumeDraft: $resumeDraft,
+            );
+
+            return redirect()
+                ->route('resume-drafts.edit', $resumeDraft)
+                ->with('error', 'Document generation failed — please try again.');
+        }
+
+        // Track usage from the spec generation call.
+        if (isset($spec['_usage'])) {
+            $usage = $spec['_usage'];
+            \App\Models\AiUsageEvent::create([
+                'provider' => 'claude',
+                'model' => $usage['model'],
+                'operation' => 'generate_document_spec',
+                'resume_draft_id' => $resumeDraft->id,
+                'input_tokens' => $usage['input_tokens'],
+                'output_tokens' => $usage['output_tokens'],
+                'cost_cents' => $usage['cost_cents'],
+                'success' => true,
+            ]);
+            unset($spec['_usage']);
+        }
+
+        // Render the spec into a .docx file.
+        $filename = 'resume_' . $resumeDraft->id . '_' . time() . '.docx';
+        $relativePath = 'resume-artifacts/' . $filename;
+        $absolutePath = storage_path('app/' . $relativePath);
+
+        try {
+            $fileSize = $renderer->render($spec, $absolutePath, $contactInfo);
+        } catch (Throwable $e) {
+            Log::error('Document rendering failed', [
+                'resume_draft_id' => $resumeDraft->id,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return redirect()
+                ->route('resume-drafts.edit', $resumeDraft)
+                ->with('error', 'Document rendering failed — please try again.');
+        }
+
+        $artifact = ResumeArtifact::create([
+            'resume_draft_id' => $resumeDraft->id,
+            'title' => $validated['document_title'] ?? null,
+            'file_path' => $relativePath,
+            'file_format' => 'docx',
+            'file_size_bytes' => $fileSize,
+        ]);
+
+        if ($resumeDraft->isApproved()) {
+            $resumeDraft->update(['status' => 'formatted']);
+        }
+
+        return redirect()
+            ->route('resume-drafts.edit', $resumeDraft)
+            ->with('status', 'Document generated — download it below.');
+    }
+
+    /**
+     * Download a generated resume artifact.
+     */
+    public function downloadArtifact(
+        ResumeDraft $resumeDraft,
+        ResumeArtifact $artifact,
+    ): BinaryFileResponse|RedirectResponse {
+        if ($artifact->resume_draft_id !== $resumeDraft->id) {
+            abort(404);
+        }
+
+        $absolutePath = storage_path('app/' . $artifact->file_path);
+
+        if (! file_exists($absolutePath)) {
+            return redirect()
+                ->route('resume-drafts.edit', $resumeDraft)
+                ->with('error', 'The artifact file could not be found.');
+        }
+
+        $resumeDraft->load('jobListing');
+        $baseName = $artifact->title
+            ?? $resumeDraft->jobListing->role_title . ' Resume';
+        $downloadName = str_replace(' ', '_', $baseName) . '.' . $artifact->file_format;
+
+        return response()->download($absolutePath, $downloadName);
     }
 
     // -----------------------------------------------------------------

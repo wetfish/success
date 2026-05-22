@@ -3,6 +3,7 @@
 namespace App\Services\Resume;
 
 use App\Enums\RequirementCategory;
+use App\Services\Extraction\SynthesisResult;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
@@ -17,12 +18,12 @@ use Throwable;
  * Shares the same API key and model config via the `services.extraction`
  * config block — same provider, same billing, different purpose.
  *
- * Currently supports one operation:
+ * Supports two operations:
  *   - analyzeRelevance: extract requirements from a listing, produce
  *     a strategy summary, and map catalog entries to requirements
- *
- * Future operations (5.3, 5.4):
  *   - generateDraft: produce a markdown resume from accepted selections
+ *
+ * Future operations (5.4):
  *   - formatDocument: convert approved draft to .docx/.pdf
  */
 class ResumeAiService
@@ -92,6 +93,332 @@ class ResumeAiService
             costCents: $this->computeCost($inputTokens, $outputTokens),
             model: $this->model,
         );
+    }
+
+    /**
+     * Generate a markdown resume draft from the user's confirmed
+     * selections, strategy, and requirement context. The prompt
+     * text is built externally by DraftPromptBuilder; this method
+     * handles the API call and response extraction.
+     *
+     * Returns raw markdown — no JSON parsing needed, since the
+     * system prompt instructs the AI to produce prose directly.
+     */
+    public function generateDraft(string $promptContext): DraftResult
+    {
+        $messages = [['role' => 'user', 'content' => $promptContext]];
+
+        try {
+            $response = $this->client()->post('/v1/messages', [
+                'model' => $this->model,
+                'max_tokens' => self::MAX_TOKENS,
+                'system' => $this->draftSystemPrompt(),
+                'messages' => $messages,
+            ]);
+        } catch (Throwable $e) {
+            throw new RuntimeException(
+                "Resume draft generation failed: {$e->getMessage()}", 0, $e
+            );
+        }
+
+        if (! $response->successful()) {
+            throw new RuntimeException(
+                "Resume draft AI returned {$response->status()}: " . $response->body()
+            );
+        }
+
+        $body = $response->json();
+        $markdown = $this->extractTextFromResponse($body);
+
+        $inputTokens = (int) ($body['usage']['input_tokens'] ?? 0);
+        $outputTokens = (int) ($body['usage']['output_tokens'] ?? 0);
+
+        return new DraftResult(
+            markdown: $markdown,
+            inputTokens: $inputTokens,
+            outputTokens: $outputTokens,
+            costCents: $this->computeCost($inputTokens, $outputTokens),
+            model: $this->model,
+        );
+    }
+
+    /**
+     * Synthesize the user's relevance notes from the review process
+     * into an updated strategy summary. Takes the current strategy
+     * and all user notes, and produces a refined strategy that
+     * incorporates the context the user added during review.
+     *
+     * Returns a SynthesisResult (reusing the extraction value object
+     * since it has the right shape: text + tokens + cost).
+     */
+    public function synthesizeNotesIntoStrategy(
+        string $currentStrategy,
+        string $notesContext,
+        string $roleTitle,
+    ): SynthesisResult {
+        $userMessage = <<<MESSAGE
+        ## Current Strategy
+
+        {$currentStrategy}
+
+        ---
+
+        ## User Notes from Review
+
+        These are the candidate's own notes explaining how their experience connects to each requirement for the "{$roleTitle}" role:
+
+        {$notesContext}
+        MESSAGE;
+
+        $system = <<<'PROMPT'
+You are a career strategist refining a resume strategy. The candidate has reviewed their experience against a job listing's requirements and written notes explaining how each piece of evidence connects. Your job is to produce an updated strategy summary that incorporates the candidate's framing.
+
+Rules:
+- Produce 3-6 sentences describing the recommended narrative angle for the resume.
+- Incorporate specific connections, framing, and emphasis from the user's notes — they've done the analytical work of linking their experience to requirements.
+- Preserve anything from the current strategy that still holds, but update or extend it with what the notes reveal.
+- Be specific — reference actual experiences and actual requirements, not generic strengths.
+- Return only the updated strategy text. No preamble, no explanation, no quotes.
+PROMPT;
+
+        $messages = [['role' => 'user', 'content' => $userMessage]];
+
+        try {
+            $response = $this->client()->post('/v1/messages', [
+                'model' => $this->model,
+                'max_tokens' => 1500,
+                'system' => $system,
+                'messages' => $messages,
+            ]);
+        } catch (Throwable $e) {
+            throw new RuntimeException(
+                "Strategy synthesis failed: {$e->getMessage()}", 0, $e
+            );
+        }
+
+        if (! $response->successful()) {
+            throw new RuntimeException(
+                "Strategy synthesis returned {$response->status()}: " . $response->body()
+            );
+        }
+
+        $body = $response->json();
+        $text = $this->extractTextFromResponse($body);
+        $inputTokens = (int) ($body['usage']['input_tokens'] ?? 0);
+        $outputTokens = (int) ($body['usage']['output_tokens'] ?? 0);
+
+        return new SynthesisResult(
+            description: trim($text),
+            inputTokens: $inputTokens,
+            outputTokens: $outputTokens,
+            costCents: $this->computeCost($inputTokens, $outputTokens),
+            model: $this->model,
+        );
+    }
+
+    /**
+     * Parse approved resume markdown into a structured JSON spec
+     * for document rendering. The AI handles all formatting
+     * decisions (what's bold, how sections are grouped, date
+     * formatting) and returns a predictable structure that the
+     * PhpWord renderer can consume mechanically.
+     *
+     * @return array The parsed document spec.
+     */
+    public function generateDocumentSpec(string $markdownContent, ?string $styleGuidelines = null): array
+    {
+        $styleSection = '';
+        if ($styleGuidelines !== null && trim($styleGuidelines) !== '') {
+            $styleSection = <<<STYLE
+
+            ---
+
+            ## Style Guidelines
+
+            The candidate has provided these formatting preferences. Incorporate them into the "styling" section of the spec:
+
+            {$styleGuidelines}
+            STYLE;
+        }
+
+        $userMessage = <<<MESSAGE
+        Parse this resume markdown into a structured JSON document spec. Return ONLY the JSON object, no preamble, no code fences.
+
+        ---
+
+        {$markdownContent}{$styleSection}
+        MESSAGE;
+
+        $messages = [['role' => 'user', 'content' => $userMessage]];
+
+        try {
+            $response = $this->client()->post('/v1/messages', [
+                'model' => $this->model,
+                'max_tokens' => 4000,
+                'system' => $this->documentSpecSystemPrompt(),
+                'messages' => $messages,
+            ]);
+        } catch (Throwable $e) {
+            throw new RuntimeException(
+                "Document spec generation failed: {$e->getMessage()}", 0, $e
+            );
+        }
+
+        if (! $response->successful()) {
+            throw new RuntimeException(
+                "Document spec AI returned {$response->status()}: " . $response->body()
+            );
+        }
+
+        $body = $response->json();
+        $text = $this->extractTextFromResponse($body);
+        $spec = $this->parseJsonResponse($text);
+
+        $inputTokens = (int) ($body['usage']['input_tokens'] ?? 0);
+        $outputTokens = (int) ($body['usage']['output_tokens'] ?? 0);
+
+        // Attach token usage to the spec for tracking.
+        $spec['_usage'] = [
+            'input_tokens' => $inputTokens,
+            'output_tokens' => $outputTokens,
+            'cost_cents' => $this->computeCost($inputTokens, $outputTokens),
+            'model' => $this->model,
+        ];
+
+        return $spec;
+    }
+
+    private function documentSpecSystemPrompt(): string
+    {
+        return <<<'PROMPT'
+You are a resume document formatter. You will receive resume content in markdown, and optionally style guidelines from the candidate. Parse the content into a structured JSON object that a document rendering engine can consume.
+
+Return a JSON object with these keys:
+
+{
+  "styling": {
+    "font_primary": "Arial",
+    "color_heading": "333333",
+    "color_accent": "333333",
+    "color_body": "444444"
+  },
+  "name": "Candidate Name",
+  "summary": "The professional summary paragraph as a single string.",
+  "experience": [
+    {
+      "title": "Job Title",
+      "organization": "Company Name",
+      "dates": "Month Year – Month Year",
+      "bullets": [
+        "First accomplishment or responsibility.",
+        "Second accomplishment with metrics."
+      ]
+    }
+  ],
+  "skills": [
+    {
+      "category": "Category Name",
+      "items": ["Skill 1", "Skill 2", "Skill 3"]
+    }
+  ],
+  "additional": [
+    {
+      "heading": "Section Name",
+      "items": ["First item.", "Second item."]
+    }
+  ]
+}
+
+Rules:
+- **Styling**: The "styling" object controls document formatting. All color values are 6-digit hex WITHOUT the # prefix. "font_primary" is the font family name. If style guidelines are provided, translate them into these fields (e.g., "use brand blue" - appropriate hex in color_accent). If no guidelines are provided, use the defaults shown above.
+- Extract the candidate name from the H1 heading. If it's a placeholder like "{{HEADER}}", use it as-is.
+- The summary is the text under "Professional Summary" or similar heading, as a single string.
+- Each experience entry is one position. Preserve the exact title, organization, and date range from the markdown.
+- Bullets are the dash-prefixed items under each position. Preserve the exact text — do not rewrite.
+- Skills should be grouped by category if the markdown groups them. If skills are a flat list, use a single entry with category "Skills".
+- The additional section captures anything after Skills — career themes, publications, open source, portfolio links. Each sub-heading becomes an entry. If there is no additional content, use an empty array.
+- Preserve all text exactly as written. Your job is to PARSE, not rewrite.
+- Return only the JSON object. No preamble, no explanation, no code fences.
+PROMPT;
+    }
+
+    /**
+     * Parse a JSON response from the AI, tolerant of code fences.
+     */
+    private function parseJsonResponse(string $text): array
+    {
+        $cleaned = trim($text);
+
+        if (str_starts_with($cleaned, '```')) {
+            $cleaned = preg_replace('/^```(?:json)?\s*/', '', $cleaned);
+            $cleaned = preg_replace('/```\s*$/', '', $cleaned);
+            $cleaned = trim($cleaned);
+        }
+
+        $parsed = json_decode($cleaned, true);
+
+        if (! is_array($parsed)) {
+            throw new RuntimeException(
+                'Could not parse JSON from document spec response. Raw: ' .
+                substr($text, 0, 500)
+            );
+        }
+
+        return $parsed;
+    }
+
+    private function draftSystemPrompt(): string
+    {
+        return <<<'PROMPT'
+You are a professional resume writer. You will receive a job listing, a resume strategy, and a set of requirements with the candidate's curated evidence for each. Your job is to produce a polished, tailored resume in markdown.
+
+## Priority of inputs
+
+The candidate has manually reviewed every piece of evidence and written their own notes explaining how their experience connects to each requirement. These inputs are your primary source of truth, in this order:
+
+1. **Strategy summary** — the overall narrative angle. This is the structural spine of the resume. Every section should serve this story.
+2. **User notes** (labeled "User note:" in the evidence) — the candidate's own framing of how each piece of evidence relates to the requirement. These override AI reasoning. When a user note says to emphasize, reframe, or connect something in a specific way, do exactly that.
+3. **Evidence details** (accomplishment descriptions, project outcomes, impact metrics) — the raw material for resume bullets.
+4. **AI reasoning** (labeled "Relevance:" in the evidence) — useful for context but subordinate to user notes. When a user note and AI reasoning disagree on framing, the user note wins.
+
+## Output structure
+
+Produce the resume as clean markdown with the following sections in order:
+
+1. **Header** — use `{{HEADER}}` as a single-line placeholder. The candidate's name and contact details are added during document formatting, not in the markdown.
+
+2. **Professional Summary** — 3-5 sentences, tightly aligned with the strategy summary provided. This is the narrative spine of the resume. Don't repeat the strategy verbatim — translate it into first-person professional prose that a hiring manager reads in 10 seconds.
+
+3. **Experience** — the core section. Group by position (company + title + dates), with bullet points for accomplishments and project highlights under each. Rules:
+   - Only include positions, projects, and accomplishments that appear in the provided evidence. Do not invent or embellish.
+   - Prioritize accomplishments with concrete impact metrics — lead with the number.
+   - Each bullet should be 1-2 sentences. Concise, active voice, past tense for completed work, present tense for current roles.
+   - Tailor the framing to the target role using the user notes as your guide. The user has already done the work of connecting their experience to the requirements — translate their framing into polished resume language.
+   - When multiple requirements map to the same position, weave them together naturally rather than repeating the position.
+   - Omit positions that have no selected evidence beneath them.
+
+4. **Skills** — a concise list of relevant skills/technologies drawn from the Tag evidence and from skills mentioned in the experience bullets. Group by category if there are enough (e.g., Languages, Frameworks, Tools, Platforms). Don't list every skill the candidate has — only those relevant to this specific role.
+
+5. **Additional** (optional) — career themes, portfolio links, or other evidence that doesn't fit neatly into Experience or Skills. Only include this section if there's meaningful content for it. Label it appropriately (e.g., "Publications", "Open Source", "Speaking", or just "Additional").
+
+## Formatting rules
+
+- Use standard markdown: `#` for the name, `##` for section headers, `###` for position headers, `-` for bullets.
+- Position headers should follow the pattern: `### Title, Organization` with dates on the next line in italics: `*Month Year - Month Year*` (or `*Month Year - Present*`).
+- No bold within bullets unless genuinely needed for emphasis. Clean prose beats heavy formatting.
+- No markdown links in the experience section — URLs go in the Additional section if included at all.
+- Aim for 1-2 pages of content when rendered. Be selective rather than comprehensive — a tight resume beats a thorough one.
+- Do not use em-dash characters (—). Use regular hyphens (-), commas, semicolons, or restructure the sentence instead. Em-dashes cause encoding issues in document generation.
+
+## What NOT to do
+
+- Do not fabricate accomplishments, metrics, or experiences not present in the evidence.
+- Do not include generic filler bullets ("Collaborated with cross-functional teams" with no specifics).
+- Do not add a cover letter, objective statement, or references section.
+- Do not include explanatory comments or meta-text — output only the resume markdown.
+- Do not wrap the output in code fences.
+- Do not ignore user notes. If a user note provides specific framing, numbers, or context not in the raw evidence, incorporate it — the user is adding information they know to be true about their own experience.
+PROMPT;
     }
 
     private function buildRelevanceMessage(

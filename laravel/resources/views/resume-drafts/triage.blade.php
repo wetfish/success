@@ -272,13 +272,33 @@
                     }
                 @endphp
 
-                <a
-                    href="{{ $firstAccepted ? route('resume-drafts.requirement', [$draft, $firstAccepted]) : '#' }}"
-                    class="btn-primary {{ $allDecided && $acceptedCount > 0 ? '' : 'opacity-50 pointer-events-none' }}"
-                    data-triage-continue
-                    @if (! $allDecided || $acceptedCount === 0) aria-disabled="true" tabindex="-1" @endif
-                >
-                    Continue to review →
+                <div class="flex items-center gap-4">
+                    <a
+                        href="{{ $firstAccepted ? route('resume-drafts.requirement', [$draft, $firstAccepted]) : '#' }}"
+                        class="btn-primary {{ $allDecided && $acceptedCount > 0 ? '' : 'opacity-50 pointer-events-none' }}"
+                        data-triage-continue
+                        @if (! $allDecided || $acceptedCount === 0) aria-disabled="true" tabindex="-1" @endif
+                    >
+                        Continue to review →
+                    </a>
+
+                    @if ($allDecided && $acceptedCount > 0)
+                        <a
+                            href="{{ route('resume-drafts.confirm-page', $draft) }}"
+                            class="link-subtle text-sm"
+                            data-triage-skip-to-confirm
+                        >
+                            Skip to confirmation →
+                        </a>
+                    @endif
+                </div>
+            </div>
+        @endif
+
+        @if (! $draft->isSelecting())
+            <div class="mt-10 pt-6" style="border-top: 1px solid var(--color-surface-input-border);">
+                <a href="{{ route('resume-drafts.edit', $draft) }}" class="link-subtle text-sm">
+                    ← Back to draft
                 </a>
             </div>
         @endif
