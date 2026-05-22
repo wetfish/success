@@ -2,24 +2,29 @@
 
 A career lifecycle tool. Catalog your work, tailor resumes to specific job listings, prep for interviews, track your time, send invoices, and manage the relationships that move your career forward — all in one place.
 
-## What it does (eventually)
+## What it does
 
-- **Employment catalog** — structured, deeply detailed records of everywhere you've worked, every project you've shipped, every accomplishment with the metrics to back it up
-- **AI-tailored resumes** — paste a job listing, get a resume built from the most relevant evidence in your catalog, with every word traceable back to source
-- **Interview prep** — practice questions generated from your actual experience, meeting notes captured during interviews and tied back to specific applications
-- **Time tracking** — log hours against tasks and projects once you've landed the job
-- **Invoicing** — generate timesheets and invoices from tracked time, integrated with payment processing
-- **Relationship management** — track the people who matter to your career, who you owe a follow-up, who's most relevant to your next move
+The core pipeline is functional end-to-end:
 
-The first three are the priority. Everything else is the long arc of the project.
+- **Employment catalog** — structured, deeply detailed records of everywhere you've worked, every project you've shipped, every accomplishment with the metrics to back it up. Manual entry and AI-powered extraction from raw notes, performance reviews, and brag docs.
+- **AI-tailored resumes** — paste a job listing, and the AI extracts requirements, maps your catalog entries to each one, and generates a strategy. Review which evidence goes where, add relevance notes explaining your framing, synthesize your notes into a refined strategy, then generate a markdown draft. Edit the draft, approve it, and produce a professionally formatted `.docx` with your contact info, brand-specific styling, and a clean layout.
 
-For the project's mission, design philosophy, and explicit anti-goals, read [`docs/00-mission.md`](docs/00-mission.md). For the development roadmap, see [`docs/06-planned-features.md`](docs/06-planned-features.md).
+The resume pipeline is the core value proposition: everything before it (data entry, AI extraction) is bootstrapping your catalog, and everything after it (interview prep, time tracking, invoicing) builds on the same foundation.
+
+### Coming next
+
+- **Multi-user support** — authentication, per-user data isolation, hosted deployment. Beta testers are waiting.
+- **Interview prep** — practice questions from your actual experience, meeting notes tied to applications, application status tracking
+- **Time tracking & invoicing** — log hours, generate timesheets, send invoices
+- **Relationship management** — track follow-ups and the people who matter to your career
+
+For the full roadmap, see [`docs/06-planned-features.md`](docs/06-planned-features.md). For the project's mission and design philosophy, read [`docs/00-mission.md`](docs/00-mission.md).
 
 ## Status
 
-**Functional MVP, in active development.** The data entry milestone is complete, and the AI extraction pipeline is mostly built. You can paste raw notes, performance reviews, or upload a previous resume and get structured draft records back to review, edit, and confirm into the catalog. Duplicate detection and merge UI (slice 4.5) is the remaining work for that milestone.
+**Functional MVP.** Five milestones complete: planning, database schema, data entry CRUD, AI extraction pipeline, and resume generation. The app can ingest career data (manually or via AI extraction from raw text), organize it into a structured catalog, and generate tailored resumes as downloadable Word documents for specific job applications.
 
-After milestone 4 wraps, the resume builder is next: capture a job listing, generate a tailored resume drawing from the catalog, save the result as an immutable artifact tied to the application. That's the moment the project shifts from "structured career database" to genuinely useful — manual entry and AI extraction are both bootstrapping steps; the long-term value is what you can do with the data.
+Currently single-user and self-hosted. Multi-user support and hosted deployment are the next milestone.
 
 ## Quick Start (Docker)
 
@@ -102,6 +107,6 @@ You can self-host Success on your own infrastructure. You'll need to provide you
 
 ## Contributing
 
-The MVP is functional and the patterns are established. New entity types follow the same structure as existing ones (model + form request + controller + Blade views + feature tests), and the design system uses a small set of reusable component classes. Reading through one of the implemented entities — Organization is the simplest, Project the most architecturally interesting — is the fastest way to onboard.
+The MVP is functional with five milestones complete and established patterns across all layers. New entity types follow the same structure as existing ones (model + form request + controller + Blade views + feature tests), the AI pipeline has clear extension points, and the design system uses a small set of reusable component classes. Reading through the resume generation flow — from `ResumeDraftController` through `ResumeAiService` to `ResumeDocumentRenderer` — is the fastest way to understand how the pieces fit together.
 
 If you've worked on career tools, resume parsers, or AI-powered document generation and have opinions about what works and what doesn't — those opinions are wanted. Open an issue or start a discussion.

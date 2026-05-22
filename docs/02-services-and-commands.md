@@ -163,11 +163,12 @@ Services for building tailored resumes against job listings. Separate from the e
 
 ### `App\Services\Resume\ResumeAiService`
 
-Handles all AI calls for the resume generation flow. Bound via `ExtractionServiceProvider` using the same API credentials as the extraction provider. Three operations:
+Handles all AI calls for the resume generation flow. Bound via `ExtractionServiceProvider` using the same API credentials as the extraction provider. Four operations:
 
 - `analyzeRelevance(catalogSummary, jobListingBody, roleTitle)` — extracts requirements from a listing, produces a strategy summary, and maps catalog entries to requirements. Returns a `RelevanceResult`. Called once when a draft is first created.
-- `generateDraft(promptContext)` — produces a markdown resume from the user's confirmed selections. The prompt text is built externally by `DraftPromptBuilder`; this method handles the API call. Returns a `DraftResult`. The system prompt explicitly prioritizes user relevance notes over AI reasoning.
+- `generateDraft(promptContext)` — produces a markdown resume from the user's confirmed selections. The prompt text is built externally by `DraftPromptBuilder`; this method handles the API call. Returns a `DraftResult`. The system prompt explicitly prioritizes user relevance notes over AI reasoning and prohibits em-dash characters to avoid XML encoding issues in document generation.
 - `synthesizeNotesIntoStrategy(currentStrategy, notesContext, roleTitle)` — refines the strategy summary by incorporating the user's relevance notes from the review process. Returns a `SynthesisResult`. Called from the confirm page when the user clicks "Synthesize from notes."
+- `generateDocumentSpec(markdownContent, styleGuidelines?)` — parses approved resume markdown into a structured JSON spec for PhpWord rendering. The AI extracts name, summary, experience entries, skills, and additional sections, plus a `styling` block (font, colors) driven by optional user-provided style guidelines. Returns the parsed spec array with usage metadata attached.
 
 ### `App\Services\Resume\DraftPromptBuilder`
 
@@ -183,6 +184,16 @@ Serializes the user's entire career catalog into structured text for the initial
 - `DraftResult` — markdown prose and token usage from `generateDraft`.
 
 Both carry `inputTokens`, `outputTokens`, `costCents`, and `model` for usage tracking.
+
+### `App\Services\Resume\ResumeDocumentRenderer`
+
+Renders a structured document spec (from `generateDocumentSpec`) into a `.docx` file via PhpWord. The renderer makes no content decisions — it applies typography, spacing, and layout mechanically from the spec.
+
+Styling (font family, heading color, accent color, body text color) is read from the spec's `styling` key, which the AI populates based on user-provided style guidelines. Without guidelines, defaults apply (Arial, dark grays).
+
+The `render(spec, outputPath, contactInfo)` method accepts a contact info array (name, title, email, phone, location) that populates the document header — these come from the generate form, not from the AI.
+
+All text is sanitized via a `clean()` method that replaces bare `&` characters (preventing XML entity errors), strips em-dashes and en-dashes (replacing with hyphens), and removes XML-illegal control characters. Text is always passed through `addText()` or `addListItemRun()->addText()` rather than `addListItem()` directly, because `addListItem()` can produce corrupt XML with special characters.
 
 ## Defense-in-depth on AI inputs
 

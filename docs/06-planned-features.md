@@ -12,106 +12,60 @@ Each milestone has an "intent" — what done looks like at the level of user val
 
 ### 1. Planning *(complete)*
 
-**Intent:** Mission, philosophy, schema principles, and milestone plan documented and agreed on. The README, `00-mission.md`, and this document exist.
+**Intent:** Mission, philosophy, schema principles, and milestone plan documented and agreed on.
 
 ### 2. Database schema *(complete)*
 
-**Intent:** Migrations, Eloquent models, relationships, and seed data for all v1 entities. The author can run `migrate:fresh --seed` and have a development database to build against. Schema documented in `docs/01-database-schema.md`.
+**Intent:** Migrations, Eloquent models, relationships, and seed data for all v1 entities. Schema documented in `docs/01-database-schema.md`.
 
 ### 3. Basic data entry MVP *(complete)*
 
-**Intent:** CRUD interfaces for organizations, positions, projects (including sub-projects), and accomplishments. The author can enter their actual employment history end-to-end through the UI without dropping into the database. Source-document UI was deferred initially and landed with milestone 4. Links UI followed in a post-milestone-4 sweep, attaching to organizations, projects, positions, and accomplishments (and to people once that slice lands). Tags UI landed in the same sweep, with a reusable autocomplete picker that surfaces existing tags and their aliases on every parent form. People UI landed next, including a collaborator picker with free-text roles on position, project, and accomplishment forms — the people-attachment shape converged across all three parent entity types during this work, so manager relationships now live as `role_on_position = "Manager"` rather than a dedicated FK.
+**Intent:** CRUD interfaces for organizations, positions, projects (including sub-projects), accomplishments, people, tags, and links. The user can enter their actual employment history end-to-end through the UI.
+
+**Key decisions.** Manager relationships use `role_on_position = "Manager"` rather than a dedicated FK — the collaborator shape converged across positions, projects, and accomplishments. Links use a polymorphic table across all parent entity types.
 
 ### 4. AI extraction pipeline *(complete)*
 
 **Intent:** Paste raw text (interview prep, brag doc, performance review). Get a draft set of structured records to review, edit, and confirm. Confirmed records get linked back to the source document for traceability.
 
-**Status by mini-slice:**
+**Architecture.** AI extraction emits entity drafts carrying nested `tags`/`collaborators`/`links` arrays. `ReviewRecordExtractor` derives top-level review records from those arrays. The extraction data is immutable; review decisions (accept/reject/alias) affect the catalog directly; at confirmation time, nested arrays resolve against catalog state. This separation keeps the audit trail intact.
 
-- **4.1 Home page draft counts & document show page summary** — complete
-- **4.2 Single-draft review page with progress bar** — complete
-- **4.3 Reject action with cascading rejection** — complete
-- **4.3.1 All-drafts-browsable & restore** — complete. Rejected drafts stay visible in the review queue with a status badge; restore action flips back to pending. Made the implicit "queue is just pending" assumption explicit and put rejected drafts back in reach.
-- **4.4 Confirm action with editable form** — complete. Pending drafts render as a form whose fields come from `DraftFieldSchema`. Submit merges form data into the payload, saves, then attempts confirmation via `DraftConfirmer`. Failures preserve edits and surface a flash message.
-- **4.5 Duplicate detection & merge UI** — complete. `DuplicateDetector` surfaces candidate records when viewing a draft. The merge UI is a side-by-side editor showing existing vs draft values per field, with per-textarea-field on-demand AI synthesis. When more than one candidate matches, the user picks before the editor opens. On merge: target record updated, draft marked `merged`, dependent drafts' parent-name references rewritten to the merged name.
-- **4.6 Extend the pipeline to extract tags, people, and links** — complete
+**Key decisions.** Nested attachment uses `preview()` (read-only) rather than `resolve()` (find-or-create) — no auto-creation of catalog records from AI output. Duplicate detection uses `DuplicateDetector` with a side-by-side merge editor and per-field AI synthesis. Three review wizard steps (tags, people, links) gate progression via middleware.
 
-**4.6 architecture summary.**
+**Known limitations.** Synchronous extraction can time out for larger documents (band-aid: nginx timeout set to 120s; proper fix: queue-based extraction, see GitHub issue #1). Batch accept/reject deliberately deferred to preserve the "considered curation" friction.
 
-AI extraction emits entity drafts only, carrying nested `tags` / `collaborators` / `links` arrays in their payloads. The extracted data is immutable. Top-level `tag` / `person` / `link` review records get derived from those nested arrays by `ReviewRecordExtractor` and surface as the wizard's review steps. Review decisions affect the catalog directly (accepts create catalog tags/people, aliases create alias rows, rejects undo prior accepts). At entity-draft confirmation time, nested arrays resolve against the catalog via `TagResolver::preview` and `PersonResolver::preview` (read-only — no auto-create). Links consult their review records: rejected links are skipped, review record payloads (which may contain user edits) are preferred over the entity draft's original nested entries. The extracted data is never modified; the audit trail stays intact; review decisions enforce themselves at materialization through catalog state.
+### 5. Resume builder *(complete)*
 
-**4.6 shipped components:**
-
-- **Extraction prompt rewritten.** `ClaudeExtractionProvider` emits entity drafts only — no top-level `tag`, `person`, or `link` records from the AI. Every entity draft can carry nested `tags`, `collaborators`, and `links` arrays. Tag nested entries are `{name, category}` objects (category from the closed `Tag::CATEGORIES` enum). Link prompt instructs the AI to always populate title and type, and to prefer including descriptions over omitting them.
-- **Nested attachment switched to preview.** `DraftConfirmer::attachNestedTags` and `attachNestedCollaborators` use the resolvers' `preview()` methods rather than `resolve()`. Names with no catalog match are skipped (no auto-create). `attachNestedLinks` consults link review records: skips rejected links, prefers review record payload for edited fields, defaults invalid types to `'other'` per `Link::TYPES`.
-- **`ReviewRecordExtractor` service** walks pending entity drafts and derives top-level `tag`/`person`/`link` review records. Dedupes (case-insensitive name for tags and people, exact URL for links), pre-computes catalog matches via the preview methods, persists. Matched tag/person records land as `status='confirmed'` directly (no decision needed); unmatched land as `pending`. Link records always land as `pending`. Idempotent — re-running on a document with existing review records is a no-op. Wired into `SourceDocumentController::extract` so derivation runs immediately after entity drafts persist.
-- **`extraction:backfill-review-records` artisan command** for retrofitting older documents and refreshing review records after catalog changes. Supports `--document=N`, `--force` (deletes pending records and redrives), and respects `--no-interaction` for scripted use.
-- **`extraction:re-extract` artisan command** for re-running the full extraction pipeline on an existing document. Deletes all extracted records (entity drafts + review records), re-runs AI extraction, and re-derives review records. Destructive — review decisions are lost. Catalog records created during previous review are not affected.
-- **Tag review wizard step.** Dedicated page at `/source-documents/{doc}/review/tags`. List UI grouped by AI-emitted category, with Accept / Alias to… / Reject actions per card. Alias picker reuses the existing `tags.search` endpoint via a new single-select `alias-picker.js` module. Action endpoints return JSON only (`{ok}` or `{error}`). Card border tints by decision state — pink for approved, muted grey for rejected, default for pending. Pre-decided records (the auto-confirmed matches from derivation) show with the approved styling on initial render. `RequireTagReviewComplete` middleware gates downstream wizard steps.
-- **Person review wizard step.** Dedicated page at `/source-documents/{doc}/review/people`. Flat list (no category grouping). Accept / Reject actions (no alias — people don't have aliases). Accept finds-or-creates a catalog person by case-insensitive name match; reject deletes the person only if this review record created it (tracked via `catalog_person_created_by_review` payload flag). Mentions show which entity drafts reference each person and in what role. `RequirePersonReviewComplete` middleware gates downstream steps.
-- **Link review wizard step.** Dedicated page at `/source-documents/{doc}/review/links`. Flat list with editable fields: URL, title, type (from `Link::TYPES`), description, is_personal_appearance checkbox. Accept means "materialize this link when the parent entity draft is confirmed"; reject means "skip it." Field edits save to the review record's payload on blur/change — the entity draft's nested array stays immutable. `RequireLinkReviewComplete` middleware gates downstream steps.
-- **Wizard routing.** `DraftReviewController::index` routes: tag-pending → tag review; person-pending → person review; link-pending → link review; else first pending entity draft; else fallback. Three middlewares enforce the same sequence on deep-links.
-- **Entity-draft page.** Nested tag, collaborator, and link arrays render as formatted read-only bullet lists (both on pending editable forms and on confirmed/rejected/merged read-only displays). The confirmed-draft read-only display properly formats list fields instead of showing raw JSON.
-- **Review page array-rendering fix.** `link_list` field type in `DraftFieldSchema` renders nested links with clickable URLs and type labels.
-
-**Known limitations (carry into future work or document).**
-
-- Orphan dependency on reject: if record A's accept creates a catalog tag and record B aliases to it, rejecting A cascade-deletes B's alias row. B's status remains 'merged' with a dangling `match_record_id`. Recovery: refresh and re-decide. Edge case; not blocking.
-- Server-rendered confirmed records show the extracted name as the "Accepted as X" target; JS-driven transitions use the catalog tag's canonical name. Slight discrepancy when extracted/catalog casing differs and the page hasn't been refreshed since accept. Cosmetic; fix would be eager-loading `matchedTag` in the controller.
-- Batch actions (Accept all / Reject all) are deliberately deferred. The per-decision friction matches the "considered curation" intent. Easy to add later if power users surface a need.
-- Synchronous extraction can time out for larger documents (30-60s). Band-aid: nginx fastcgi_read_timeout set to 120s. Proper fix: queue-based extraction (see GitHub issue #1).
-
-**Status of preparatory work for 4.6.** Three chunks of foundation landed before the active plan was finalized:
-
-- **DraftConfirmer extended** for `person` and `link` record types, and for materializing nested `tags` / `collaborators` attachments on entity drafts. Top-level link confirmation was reverted; links now materialize via nested arrays only.
-- **DraftFieldSchema extended** with `boolean`, `tag_list`, `collaborator_list`, `link_list` field types and dedicated schemas for `person` and `link`.
-- **Resolution services** (`TagResolver`, `PersonResolver`) extracted from `DraftConfirmer` into `app/Services/Resolution/`. Each provides `resolve()` (find-or-create) and `preview()` (read-only inspection) methods. Nested attachment uses `preview()` exclusively after chunk 4a.
-
-**Outstanding people work** (unchanged from prior plan). Two small follow-ups: (1) inline quick-add from the person picker (create a name-only person mid-form when the typed name doesn't exist yet — schema permits this, validation already accepts name-only submissions, just need the UI affordance), and (2) extending the link picker to support Person as a linkable entity (`createForPerson` route, LinkController LINKABLE_MAP entry, match arm in `links/_section.blade.php`). Neither blocks the 4.6 chunks; both are good "polish the people surface" slices when time permits.
-
-**Vestigial source-document tagging.** The schema-level `source_documents.tags()` polymorphic relationship is no longer used by the application — AI extraction tags entity drafts, not source documents. The `morphedByMany` and `tags()` relationship remain in place because removing them requires a migration to clean up taggables rows. Candidate for a future cleanup slice; not blocking anything.
-
-**Cache tag statistics before SaaS launch.** The tag index page computes usage counts via a correlated subquery against `taggables` on every page load. Fine at MVP scale (hundreds of tags, a handful of references each), but it scans the full join table and will become a hotspot at scale. Add a `tag_statistics` cache table (or Redis-backed counter) before milestone 10 ships multi-user.
-
-### 5. Resume builder *(active)*
-
-**Intent:** Capture a job listing as a structured entity. Compare it against the user's catalog. Generate a tailored resume in three steps: AI-driven catalog relevance review, rough markdown draft for content editing, then a professionally formatted .docx or .pdf. Save the generated resume as an immutable artifact tied to the application.
-
-**Three-step generation flow.** The flow adds a decision point before prose generation — the user reviews which catalog entries are relevant to the listing and curates what goes into the resume before the AI writes anything. This applies the "considered curation" philosophy from the extraction review wizard to output generation.
-
-1. **Catalog relevance review (multi-page wizard).** AI extracts requirements from the listing, produces a strategy summary, and maps catalog entries to specific requirements. The review is a three-screen wizard: (a) strategy editing and requirement triage — accept or reject each requirement with match-count visibility; (b) per-requirement selection review — one requirement per page, with catalog search and freeform text entry that feeds back into the catalog through the existing extraction pipeline; (c) confirmation summary. The wizard design reduces cognitive load (triage ~14 requirements, not ~47 selections) and closes the lifecycle loop (applying to jobs grows the catalog).
-2. **Rough draft generation and editing.** AI produces a markdown resume from the accepted selections under accepted requirements. User edits inline. Original AI output preserved in `generated_content` for revert; user edits stored in `user_content`.
-3. **Formatted document generation.** Approved draft is submitted to the AI for conversion to .docx or .pdf. Output saved as an immutable artifact.
-
-**Schema landed.** Five new tables (`job_listings`, `job_listing_requirements`, `resume_drafts`, `resume_selections`, `resume_artifacts`), a nullable `resume_draft_id` FK on `ai_usage_events`, and origin tracking on `source_documents`. See `01-database-schema.md` for full table definitions.
+**Intent:** Capture a job listing, compare it against the catalog, generate a tailored resume as a downloadable `.docx` with professional formatting.
 
 **Mini-slices:**
 
-- **5.1 Job listing CRUD + organization picker** *(complete).* Top-level job listing page with autocomplete organization picker (select existing or auto-create as `prospect`). Listing form: role title, body text paste, optional fields (source URL, location, compensation range, date posted). Pure CRUD — no AI in this slice.
-- **5.2 Catalog summarization + relevance review** *(complete).* AI extracts requirements from the listing, produces a strategy summary, and maps catalog entries to specific requirements. Review is a three-screen wizard: (1) strategy & requirements triage — accept/reject/duplicate requirements with match counts, strategy synthesis; (2) per-requirement review — one requirement per page, catalog selections with include/exclude, catalog search by name and parent organization, freeform text entry that redirects to the extraction pipeline with auto-return; (3) confirm & generate — summary of all decisions with duplicate grouping, submit to advance to `drafting`. The freeform text entry on Screen 2 feeds back into the catalog through the existing extraction pipeline, so the catalog grows as a side effect of applying to jobs. Deferred for future polish: in-context modals for extraction review, inline source record editing, and catalog search preview.
-- **5.3 Rough draft generation + editing UI.** AI generates markdown resume from accepted selections. Editing UI with save. Revert to original. Status transitions: `selecting` → `drafting` → `editing` → `approved`.
-- **5.4 Formatted document generation.** Template-based .docx or .pdf from approved `user_content`. Artifact storage. Status transition: `approved` → `formatted`.
-- **5.5 Application tracking.** Status tracking per listing (applied, interviewing, offered, rejected, ghosted). Application history view. Additive — doesn't touch existing tables.
+- **5.1 Job listing CRUD + organization picker** *(complete).* Top-level listing page with autocomplete org picker.
+- **5.2 Catalog summarization + relevance review** *(complete).* AI extracts requirements, produces strategy, maps catalog entries. Three-screen wizard: triage, per-requirement review with catalog search and freeform text entry, confirmation with note synthesis. Freeform text feeds back into the catalog through the extraction pipeline.
+- **5.3 Rough draft generation + editing UI** *(complete).* AI generates markdown resume prioritizing user relevance notes over AI reasoning. Enhanced confirm page with "Synthesize from notes." Editing UI with save, revert, approve. Non-destructive revise preserves content.
+- **5.4 Formatted document generation** *(complete).* AI parses markdown into a structured JSON spec, PhpWord renders `.docx` with user-provided contact info, document title, and brand-specific style guidelines. Stored as `ResumeArtifact` records. Dependency: `phpoffice/phpword`.
 
-### 6. Interview prep
+**Key decisions.** System prompt explicitly ranks inputs: user notes > strategy > evidence > AI reasoning. "Revise selections" only resets status, never wipes content — paid AI output is never destroyed by navigation. All wizard screens viewable read-only at any status. XML sanitization in the renderer handles bare `&`, em-dashes, and control characters that corrupt PhpWord output.
 
-**Intent:** Generate practice questions from the user's actual experience, formatted for STAR-style answers. Capture meeting notes during interviews and tie them back to specific applications and the people who interviewed you.
+### 6. Multi-user / SaaS readiness *(next)*
 
-### 7. Time tracking
+**Intent:** Add a `users` table, build authentication, run the migration that adds `user_id` foreign keys to every owned entity, build subscription handling, set up hosted deployment, and add the nullable `user_id` foreign key to `tags` for the global/personal scope distinction. Until this milestone, the app is a single-user tool that happens to be open source. Beta testers are waiting — this is the priority.
+
+### 7. Interview prep
+
+**Intent:** Generate practice questions from the user's actual experience, formatted for STAR-style answers. Capture meeting notes during interviews and tie them back to specific applications and the people who interviewed you. Includes application status tracking (applied, interviewing, offered, rejected, ghosted) — deferred from the resume builder milestone where it was originally planned as 5.5.
+
+### 8. Time tracking
 
 **Intent:** Log hours against tasks and projects once employed. Carries forward into the post-job phase of the career lifecycle. Designed to be usable as a standalone tracker, not just a feeder for invoicing.
 
-### 8. Invoicing
+### 9. Invoicing
 
 **Intent:** Generate timesheets and invoices from tracked time. Integrate with payment processing (Stripe or similar). Useful for contractors, freelancers, and anyone with billable client relationships.
 
-### 9. Relationship management
+### 10. Relationship management
 
 **Intent:** Leverage the `people` table that's been growing since milestone 2. Track follow-up cadence, notes per person, and the relationships that matter to the user's career growth. This is the long-tail feature that keeps users engaged after they've landed the job.
-
-### 10. Multi-user / SaaS readiness
-
-**Intent:** Add a `users` table, build authentication, run the migration that adds `user_id` foreign keys to every owned entity, build subscription handling, set up hosted deployment, and add the nullable `user_id` foreign key to `tags` for the global/personal scope distinction. Until this milestone, the app is a single-user tool that happens to be open source.
 
 ---
 
@@ -157,11 +111,11 @@ Employers, clients, personal projects, open source communities, volunteer work, 
 
 A separate `career_themes` table holds user-authored narrative threads. These cross organizations and projects and represent the user's framing of their own career. Themes link to the projects and accomplishments that exemplify them, and the AI uses them as the spine of tailored output.
 
-### No user system or auth scaffolding until milestone 10
+### No user system or auth scaffolding until milestone 6
 
 MVP runs as a single-user application. There is no `users` table, no authentication, no `user_id` foreign keys on any entity, and the default Laravel auth migrations are removed from the project. The app is intended to be self-hosted by one person dogfooding it during their job search.
 
-The trade-off this creates is real: when multi-user support lands at milestone 10, every entity that holds user data needs a migration to add a `user_id` foreign key. That's roughly ten tables. Mechanical work, half a day with concentrated effort.
+The trade-off this creates is real: when multi-user support lands at milestone 6, every entity that holds user data needs a migration to add a `user_id` foreign key. That's roughly ten tables. Mechanical work, half a day with concentrated effort.
 
 We accepted this cost because the alternative — carrying nullable `user_id` columns everywhere from day one with no users table to constrain them — creates worse problems. Future contributors would see the columns and assume there's a user system. Factories would need to invent user references that point at nothing. Every new table going forward would have to remember to include the column even though it's structurally meaningless. The schema would lie about its semantics for an indefinite period of time.
 
@@ -171,9 +125,9 @@ Honest schema now, migration later, is the better path.
 
 The `tags` table is intentionally minimal: `name`, `category`, `description`. No scope column, no `user_id`, no aliases-with-scope. Every tag in MVP is effectively global because there's only one user.
 
-When multi-user support lands at milestone 10, a nullable `user_id` foreign key gets added to `tags`: `null` means a global tag (visible to all users), a populated `user_id` means a personal tag (visible only to that user). This achieves the "global with a user-scoped escape hatch" pattern without needing a separate `scope` column whose values would just be derivable from whether `user_id` is null. The data model becomes the documentation.
+When multi-user support lands at milestone 6, a nullable `user_id` foreign key gets added to `tags`: `null` means a global tag (visible to all users), a populated `user_id` means a personal tag (visible only to that user). This achieves the "global with a user-scoped escape hatch" pattern without needing a separate `scope` column whose values would just be derivable from whether `user_id` is null. The data model becomes the documentation.
 
-This was a deliberate simplification from an earlier proposal that included a `scope` enum-like string. We dropped it because (a) it's redundant with the nullable user_id approach, and (b) MVP doesn't have a user concept yet, so any scoping field would be carrying meaningless data until milestone 10.
+This was a deliberate simplification from an earlier proposal that included a `scope` enum-like string. We dropped it because (a) it's redundant with the nullable user_id approach, and (b) MVP doesn't have a user concept yet, so any scoping field would be carrying meaningless data until milestone 6.
 
 ### Source documents as a peer entity
 
@@ -219,10 +173,15 @@ Things we explicitly considered and decided to build later. Each is designed-aro
 | Person-organization history | Single-user mode doesn't need it; useful for relationship management later | Add a `person_organization_history` table; current `current_organization_id` becomes a denormalized convenience field |
 | Project-to-project relationships (depends_on, extends, etc.) | Self-nesting handles the most common case; explicit relationships matter for advanced framing | Add a `project_relationships` table later |
 | Decision logs | `rationale` field on projects covers 80% | Promote to its own table when interview prep features need richer structure |
-| Accomplishment variants (per-application rewrites) | Belongs with the resume builder | Build alongside the resume generator |
-| Applications tracking table | Resume builder milestone 5.5 | Additive — status column on `job_listings` or a separate `applications` table |
+| Accomplishment variants (per-application rewrites) | Belongs with interview prep or future resume polish | Additive table |
+| Applications tracking table | Interview prep milestone 7 | Additive — status column on `job_listings` or a separate `applications` table |
 | References, certifications, education | Trivial flat tables; no schema risk | Add when needed |
-| User accounts / multi-tenancy | Single-user dogfood phase first; carrying nullable `user_id` columns with no users table would be misleading | When milestone 10 lands: add a `users` table, then add `user_id` foreign keys via migration to roughly ten entity tables (organizations, positions, projects, accomplishments, people, source_documents, career_themes, tags, etc.), backfilling all existing rows to point at the dogfood user |
+| User accounts / multi-tenancy | Single-user dogfood phase first; carrying nullable `user_id` columns with no users table would be misleading | When milestone 6 lands: add a `users` table, then add `user_id` foreign keys via migration to roughly ten entity tables, backfilling all existing rows to point at the dogfood user |
+| Person picker inline quick-add | UI affordance only; schema and validation already support name-only people | One form change |
+| Link picker for Person entity | Need `createForPerson` route and LINKABLE_MAP entry | One controller change + one match arm |
+| Vestigial source-document tagging | `source_documents.tags()` polymorphic relationship is unused — AI tags entity drafts, not source documents | Cleanup migration to remove taggables rows |
+| Cache tag statistics | Tag index computes usage counts via correlated subquery; fine at MVP scale, hotspot at multi-user scale | `tag_statistics` cache table or Redis counter before milestone 6 |
+| Store AI response bodies | `ai_usage_events` records metadata but not response content; no recovery path for lost AI output | Add `response_body` longText column (see GitHub issue #2) |
 
 ---
 
@@ -230,17 +189,13 @@ Things we explicitly considered and decided to build later. Each is designed-aro
 
 Decisions still pending. Each will need to be resolved before the relevant milestone.
 
-### AI provider selection *(resolved)*
-
-Anthropic's Claude API is the provider. Abstracted behind `App\Services\Extraction\ExtractionProvider` so a `FakeExtractionProvider` can stand in for tests and a different provider could be swapped in at the service-container boundary if needed. Current production model: `claude-sonnet-4-6`. Pricing constants live in `App\Services\AiUsageTracker`.
-
 ### Hosting strategy for the eventual SaaS
 
-Single-tenant per user (one database per customer)? Multi-tenant with row-level scoping? Multi-tenant changes some schema decisions (especially how the eventual `tags.user_id` foreign key behaves). Doesn't need to be answered until milestone 10.
+Single-tenant per user (one database per customer)? Multi-tenant with row-level scoping? Multi-tenant changes some schema decisions (especially how the eventual `tags.user_id` foreign key behaves). Needs to be answered early in milestone 6.
 
 ### Monetization model specifics
 
-The README outlines the rough shape (cheap basic tier, higher-priced advanced tier). Actual pricing depends on real costs of AI inference per user, which we won't know until we've dogfooded the AI features. To be revisited after milestone 5.
+The README outlines the rough shape (cheap basic tier, higher-priced advanced tier). We now have real cost data from dogfooding: a full resume generation (relevance analysis + draft generation + document spec) costs roughly 3-4 API calls. Actual pricing to be set during milestone 6 based on per-user inference costs.
 
 ### Privacy of source documents
 

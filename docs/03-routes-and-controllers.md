@@ -266,11 +266,24 @@ The confirm POST validates at least one accepted requirement with at least one i
 | `resume-drafts/{draft}/approve` | POST | `resume-drafts.approve` |
 | `resume-drafts/{draft}/revise` | POST | `resume-drafts.revise-selections` |
 
-The editing page shows a monospace textarea with `user_content` for the user to review and edit the AI-generated resume markdown. Save, revert to AI original, and approve actions are available. Both revert and approve use confirmation modals. Approved drafts render read-only with a note that document formatting is coming in 5.4.
+The editing page shows a monospace textarea with `user_content` for the user to review and edit the AI-generated resume markdown. Save, revert to AI original, and approve actions are available. Both revert and approve use confirmation modals. Approved drafts render read-only with document generation controls.
 
-"Revise selections and regenerate" discards the generated content (clears both `generated_content` and `user_content`), resets status to `selecting`, and redirects to the triage page. Requirement decisions, selections, and user notes are preserved — only the generated prose is discarded.
+"Revise selections" resets status to `selecting` and redirects to the triage page. Content is preserved — `generated_content` and `user_content` are never wiped. The user's prior draft remains intact until they explicitly regenerate, at which point `confirm()` overwrites it.
 
-The `show` route acts as a status router: `selecting` renders triage, `editing`/`approved` redirects to the edit page, and `drafting` with no content resets to `selecting` (recovering from stale state left by failed generation or the 5.2 placeholder).
+The `show` route acts as a status router: `selecting` renders triage, `editing`/`approved`/`formatted` redirects to the edit page, and `drafting` with no content resets to `selecting`. A `?view=triage` query parameter overrides the redirect and renders triage read-only for any status — used by the "View requirements triage" link on the edit page.
+
+All wizard screens (triage, per-requirement review, confirm) are viewable at any status. Editing controls are conditionally rendered based on `isSelecting()`, so non-selecting views are read-only with "Back to draft" navigation links.
+
+### Document generation
+
+| Route | Method | Name |
+|---|---|---|
+| `resume-drafts/{draft}/generate-document` | POST | `resume-drafts.generate-document` |
+| `resume-drafts/{draft}/artifacts/{artifact}/download` | GET | `resume-drafts.download-artifact` |
+
+Available from `approved` and `formatted` status. The generate form collects contact info (name, title, email, phone, location), an optional document title, and optional style guidelines. The POST calls `generateDocumentSpec()` to parse the markdown into a structured spec, renders it through `ResumeDocumentRenderer` into a `.docx`, stores the file as a `ResumeArtifact`, and advances status to `formatted` on first generation. Style guidelines are persisted on the draft for reuse across regenerations.
+
+The download route serves the artifact file with a filename derived from the artifact title (or the job listing role title as fallback). Multiple artifacts can exist per draft — each generation creates a new one.
 
 ## Destroy redirects
 
